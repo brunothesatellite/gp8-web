@@ -69,6 +69,31 @@
     PlaybackRange: (_AT.synth && _AT.synth.PlaybackRange) || _AT.PlaybackRange
   };
 
+  /* Les réglages "enum" d'alphaTab sont des ENTIERS au runtime :
+       LayoutMode.Page = 0, .Horizontal = 1, .Parchment = 2
+       ScrollMode.Off  = 0, .Continuous = 1, .OffScreen = 2, .Smooth = 3
+
+     Seul le CHEMIN DE CONSTRUCTION convertit les chaînes : `new AlphaTabApi(el,
+     {...})` passe par `JsonConverter.jsObjectToSettings()` → `JsonHelper.parseEnum()`.
+     Une affectation directe (`api.settings.display.layoutMode = 'horizontal'`)
+     laisse la STRING en place, et `Environment.getLayoutEngineFactory()` fait :
+
+         if (!layoutMode || !Environment.layoutEngines.has(layoutMode))
+           return ...LayoutEngineFactory.get(LayoutMode.Page);   // ← Page silencieux !
+
+     → le select disait "Horizontal" pendant que la partition restait en Page.
+       D'où ce convertisseur, à appeler sur TOUTE affectation d'un réglage enum. */
+  function enumId(enumObj, name) {
+    if (!enumObj || name === null || name === undefined) return name;
+    if (typeof name === 'number') return name;
+    const key = Object.keys(enumObj)
+      .filter(k => !/^\d+$/.test(k))                       // exclut le reverse-mapping
+      .find(k => k.toLowerCase() === String(name).toLowerCase());
+    return key !== undefined ? enumObj[key] : name;
+  }
+  const layoutId  = v => enumId(_AT.LayoutMode,  v);
+  const scrollId  = v => enumId(_AT.ScrollMode,  v);
+
   /* Enveloppe protectrice : une exception dans un handler d'événement
      alphaTab remonte dans api.load() et annule le chargement du score. */
   const safe = fn => (...args) => { try { fn(...args); } catch (e) { console.error('[handler]', e); } };
@@ -851,14 +876,16 @@
       App.onPlaybackRange(null);
     }
 
-    /* -------- Affichage -------- */
+    /* -------- Affichage --------
+       ⚠ enum → ENTIER : voir enumId(). Affecter 'horizontal' (string) ferait
+       retomber silencieusement sur LayoutMode.Page. */
     function setLayout(mode) {
-      S.api.settings.display.layoutMode = mode;
+      S.api.settings.display.layoutMode = layoutId(mode);
       S.api.updateSettings();
       S.api.render();
     }
     function setScrollMode(mode) {
-      S.api.settings.player.scrollMode = mode;
+      S.api.settings.player.scrollMode = scrollId(mode);
       S.api.updateSettings();
     }
     function setSpeed(pct) { S.api.playbackSpeed = pct; MixSync.setRate(pct); }
@@ -1210,13 +1237,15 @@
 
     /* ---------- responsive : layout ---------- */
     function applyResponsiveLayout() {
-      if (!Player.S.api || !Player.S.score) return;
+      const api = Player.S.api;
+      if (!api) return;
       // le layout par défaut suit la largeur d'écran ; on laisse le choix manuel ensuite
-      const wanted = mqDesktop.matches ? 'horizontal' : 'page';
-      if (Player.S.api.settings.display.layoutMode !== wanted && !layoutTouched) {
-        $('#layoutSelect').value = wanted;
-        Player.setLayout(wanted);
-      }
+      const label = mqDesktop.matches ? 'horizontal' : 'page';
+      const wanted = layoutId(label);
+      if (api.settings.display.layoutMode === wanted || layoutTouched) return;
+      $('#layoutSelect').value = label;
+      if (Player.S.score) Player.setLayout(wanted);   // → render
+      else api.settings.display.layoutMode = wanted;   // avant le 1er score
     }
     let layoutTouched = false;
 
@@ -1312,6 +1341,14 @@
       wireDnD();
       wireShortcuts();
       paintAllRanges();
+
+      /* alphaTab démarre sur LayoutMode.Page alors que la 1ʳᵉ option du select
+         est « Horizontal » : sans réglage explicite le select MENT au
+         chargement (et applyResponsiveLayout() rendait return, S.score == null).
+         On pose donc la valeur RÉELLE avant la création de l'API. */
+      const defaultLayout = mqDesktop.matches ? 'horizontal' : 'page';
+      CFG.alphatab.display.layoutMode = layoutId(defaultLayout);
+      $('#layoutSelect').value = defaultLayout;
 
       Player.init($('#scoreArea'));
       applyResponsiveLayout();

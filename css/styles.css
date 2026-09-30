@@ -8,10 +8,16 @@
   html, body { -webkit-tap-highlight-color: transparent; }
   body { font-family: Inter, system-ui, "Segoe UI", sans-serif; }
 
-  /* La partition = une feuille blanche posée dans une pièce sombre */
-  #viewport { background:
-      radial-gradient(1200px 600px at 50% -10%, rgba(14,165,233,.10), transparent 60%),
-      #020617; }
+  /* La partition = une feuille blanche.
+     ⚠ En layout « Horizontal », alphaTab dessine UNE SEULE ligne infinie :
+     le canvas est PLUS LARGE que #scoreArea (et que l'écran) et déborde.
+     Si le fond blanc n'était porté que par #scoreArea, tout défilement à
+     droite révélait le fond sombre de #viewport → notation noire illisible.
+     Le fond de #viewport est fixé à sa propre boîte (attachment: scroll,
+     valeur par défaut) : il reste blanc à TOUS les offset de défilement,
+     horizontaux comme verticaux. La page « sombre » est assurée par
+     #emptyState (fond opaque en ligne) tant qu'aucun score n'est chargé. */
+  #viewport { background: var(--sheet); }
   #scoreArea { background: var(--sheet); }
 
   /* Scrollbars discrètes */
