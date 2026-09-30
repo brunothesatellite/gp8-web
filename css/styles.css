@@ -95,3 +95,46 @@
   }
   .field:focus{ border-color:#0ea5e9; box-shadow:0 0 0 3px rgba(14,165,233,.2); }
   .lbl{ font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:#94a3b8; font-weight:700; }
+
+  /* =========================================================
+     MÉLANGEUR (tiroir) — MEMBRE DU FLEX #stage
+     Il ne recouvre JAMAIS l'interface : quand il est ouvert,
+     #viewport rétrocède (largeur sur desktop, hauteur sur mobile).
+     Fermeture manuelle uniquement (✕ / Échap) → pas de backdrop.
+     ========================================================= */
+  #drawer{
+    display:none;
+    flex-direction:column;
+    flex-shrink:0;
+    min-height:0;
+    background:#0f172a;
+    height:46vh;                       /* mobile : panneau bas, la partition rétrécit */
+    border-top:1px solid rgba(148,163,184,.16);
+  }
+  body.drawer-open #drawer{ display:flex; }
+  @media (min-width: 768px){
+    #drawer{
+      height:auto;
+      width:340px;                     /* desktop : colonne de droite */
+      border-top:0;
+      border-left:1px solid rgba(148,163,184,.16);
+    }
+  }
+
+  /* états affichés / mute / solo */
+  .mx-btn{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:26px; height:26px; flex-shrink:0; border-radius:8px;
+    background:rgba(30,41,59,.85); border:1px solid rgba(148,163,184,.16);
+    color:#94a3b8; transition:.13s; cursor:pointer;
+  }
+  .mx-btn:hover{ background:rgba(51,65,85,.95); color:#e2e8f0; }
+  .mx-btn:active{ transform:translateY(1px); }
+  .mx-btn.is-on[data-act="eye"] { background:rgba(226,232,240,.16); color:#f8fafc; border-color:rgba(226,232,240,.50); }
+  .mx-btn.is-on[data-act="mute"]{ background:rgba(249,115,22,.22);   color:#fdba74; border-color:rgba(249,115,22,.65); }
+  .mx-btn.is-on[data-act="solo"]{ background:rgba(34,197,94,.20);    color:#86efac; border-color:rgba(34,197,94,.60); }
+  .mx-btn:disabled{ opacity:.35; cursor:not-allowed; }
+
+  /* faders par piste */
+  .mx-vol{ height:14px; width:74px; flex-shrink:0; min-width:0; }
+  @media (max-width: 480px){ .mx-vol{ width:96px; } }

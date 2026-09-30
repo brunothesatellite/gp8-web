@@ -98,9 +98,14 @@
         </button>
 
         <div class="ml-auto flex items-center gap-1.5 md:ml-3">
-          <select id="trackSelect" class="field max-w-[42vw] md:max-w-[240px]" disabled>
-            <option value="">— aucune piste —</option>
-          </select>
+          <!-- ancien sélecteur de piste SUPPRIMÉ : redondant avec le mélangeur.
+               Il ouvre le tiroir, qui se redimensionne l'interface (pas de recouvrement). -->
+          <button id="btnMixer" class="btn-ctl" title="Mélangeur : affichage, mute, solo, niveaux" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M4 7h7M15 7h5M4 17h5M13 17h7"/>
+              <circle cx="13" cy="7" r="2.2"/><circle cx="11" cy="17" r="2.2"/>
+            </svg>
+          </button>
           <button id="btnMore" class="btn-ctl" title="Réglages">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
           </button>
@@ -110,26 +115,7 @@
 
     <!-- panneau avancé -->
     <div id="advanced"
-         class="grid-cols-1 gap-x-6 gap-y-3 border-t border-white/10 px-3 py-3 sm:grid-cols-2 lg:grid-cols-4 md:px-5">
-
-      <!-- VOLUMES -->
-      <section class="space-y-2.5">
-        <div class="flex items-center justify-between">
-          <span class="lbl">Volumes</span>
-          <span id="sourceBadge" class="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-400 border border-white/10">Source : —</span>
-        </div>
-        <label class="flex items-center gap-3">
-          <span class="w-14 shrink-0 text-[11px] text-slate-400">MIDI</span>
-          <input id="volMidi" type="range" min="0" max="100" value="85" class="flex-1">
-          <span id="volMidiVal" class="w-8 text-right font-mono text-[11px] text-slate-500">85</span>
-        </label>
-        <label class="flex items-center gap-3">
-          <span class="w-14 shrink-0 text-[11px] text-slate-400">Audio</span>
-          <input id="volAudio" type="range" min="0" max="100" value="100" class="flex-1">
-          <span id="volAudioVal" class="w-8 text-right font-mono text-[11px] text-slate-500">100</span>
-        </label>
-        <p id="volHint" class="text-[10.5px] leading-snug text-slate-500">—</p>
-      </section>
+         class="grid-cols-1 gap-x-6 gap-y-3 border-t border-white/10 px-3 py-3 sm:grid-cols-2 lg:grid-cols-3 md:px-5">
 
       <!-- LECTURE -->
       <section class="space-y-2.5">
@@ -139,20 +125,10 @@
           <input id="speed" type="range" min="40" max="150" value="100" class="flex-1">
           <span id="speedVal" class="w-10 text-right font-mono text-[11px] text-slate-500">100%</span>
         </label>
-        <label class="flex items-center gap-3">
-          <span class="w-14 shrink-0 text-[11px] text-slate-400">Méta</span>
-          <input id="volClick" type="range" min="0" max="100" value="60" class="flex-1">
-          <span id="volClickVal" class="w-8 text-right font-mono text-[11px] text-slate-500">60</span>
-        </label>
-        <label class="flex items-center gap-3">
-          <span class="w-14 shrink-0 text-[11px] text-slate-400">Source</span>
-          <select id="sourceSelect" class="field flex-1">
-            <option value="auto">Auto (audio embarqué si présent)</option>
-            <option value="synth">Synthé MIDI</option>
-            <option value="mix" selected>Mix : synthé MIDI + audio embarqué</option>
-            <option value="external">Média externe (&lt;audio&gt; maison)</option>
-          </select>
-        </label>
+        <p class="text-[10.5px] leading-snug text-slate-500">
+          Niveaux, mute, solo et affichage des pistes : <b>onglet mélangeur</b> (bouton en haut à droite).
+          MIDI et audio embarqué sonnent ensemble ; c'est le mélangeur qui décide.
+        </p>
       </section>
 
       <!-- BOUCLE A/B -->
@@ -204,10 +180,15 @@
   <!-- =========================================================
        2. ZONE CENTRALE : PARTITION
        ========================================================= -->
-  <main id="viewport" class="order-1 md:order-2 relative flex-1 overflow-auto overscroll-contain">
+  <!-- #stage contient la partition ET le mélangeur : quand le tiroir s'ouvre,
+       il prend sa place dans ce flex et #viewport RÉTROCÉDÈ de la largeur
+       (desktop) ou de la hauteur (mobile) — aucun recouvrement possible. -->
+  <div id="stage" class="order-1 md:order-2 flex min-h-0 flex-1 flex-col md:flex-row">
 
     <!-- conteneur alphaTab : DOIT rester dans le flux (jamais display:none),
          sinon alphaTab mesure une largeur de 0 au render. -->
+    <main id="viewport" class="relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
+
     <div id="scoreArea" class="alphaTab min-h-full w-full" style="background:var(--sheet)"></div>
 
     <!-- état vide : overlay opaque posé AU-DESSUS de la feuille -->
@@ -255,28 +236,61 @@
     </div>
   </main>
 
-  <!-- =========================================================
-       DRAWER : LISTE DES PISTES
-       ========================================================= -->
-  <div id="drawerBackdrop" class="hidden fixed inset-0 z-50 bg-black/50"></div>
-  <aside id="drawer"
-         class="fixed right-0 top-0 z-[60] flex h-full w-[86vw] max-w-sm translate-x-full flex-col border-l border-white/10 bg-slate-900 shadow-2xl transition-transform duration-200">
-    <div class="flex items-center justify-between border-b border-white/10 px-4 py-3.5">
-      <div>
-        <div class="lbl">Pistes</div>
-        <div id="drawerScoreTitle" class="text-sm font-semibold text-white">—</div>
+    <!-- =========================================================
+         MÉLANGEUR — intégré au FLEX de #stage : il redimensionne
+         l'interface (jamais de recouvrement) et ne se ferme que
+         manuellement (✕ ou Échap).
+         ========================================================= -->
+    <aside id="drawer">
+      <div class="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2.5">
+        <div class="min-w-0">
+          <div class="lbl">Mélangeur</div>
+          <div id="drawerScoreTitle" class="truncate text-sm font-semibold text-white">—</div>
+        </div>
+        <button id="drawerClose" class="btn-ctl h-8 min-w-8" title="Fermer (Échap)">✕</button>
       </div>
-      <button id="drawerClose" class="btn-ctl h-8 min-w-8">✕</button>
-    </div>
-    <div class="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
-      <button id="btnAllTracks" class="btn-ctl h-8 flex-1 text-xs">Tout afficher</button>
-      <button id="btnResetChannels" class="btn-ctl h-8 flex-1 text-xs">Réinit. canaux</button>
-    </div>
-    <div id="trackList" class="thin-scroll flex-1 overflow-y-auto px-3 py-3"></div>
-    <p class="border-t border-white/10 px-4 py-3 text-[10.5px] leading-snug text-slate-500">
-      Mute / Solo agissent sur le synthé MIDI uniquement (pas sur la piste audio embarquée).
-    </p>
-  </aside>
+
+      <div class="flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2">
+        <button id="btnAllTracks" class="btn-ctl h-8 flex-1 text-xs">Tout afficher</button>
+        <button id="btnResetMix" class="btn-ctl h-8 flex-1 text-xs">Réinit. mix</button>
+      </div>
+
+      <div class="flex shrink-0 items-center gap-1.5 border-b border-white/10 px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-500">
+        <span class="w-1.5"></span>
+        <span class="flex-1">Piste</span>
+        <span class="w-6 text-center" title="Affichage : une piste seule ou toutes">
+          <svg class="mx-auto" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        </span>
+        <span class="w-6 text-center" title="Mute : la piste ne sonne pas">
+          <svg class="mx-auto" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m22 9-6 6M16 9l6 6"/></svg>
+        </span>
+        <span class="w-6 text-center" title="Solo : seul cela sonne (un seul à la fois)">
+          <svg class="mx-auto" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+        </span>
+        <span class="w-[74px] text-right">Niveau</span>
+      </div>
+
+      <div id="trackList" class="thin-scroll min-h-0 flex-1 overflow-y-auto px-2 py-2"></div>
+
+      <div class="shrink-0 space-y-2 border-t border-white/10 px-3 py-2.5">
+        <div class="flex items-center gap-2">
+          <span class="w-[74px] shrink-0 text-[11px] text-slate-400">Master</span>
+          <input id="volMaster" type="range" min="0" max="100" value="85" class="min-w-0 flex-1">
+          <span id="volMasterVal" class="w-7 shrink-0 text-right font-mono text-[11px] text-slate-500">85</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-[74px] shrink-0 text-[11px] text-slate-400">Métronome</span>
+          <input id="volClick" type="range" min="0" max="100" value="60" class="min-w-0 flex-1">
+          <span id="volClickVal" class="w-7 shrink-0 text-right font-mono text-[11px] text-slate-500">60</span>
+        </div>
+        <p class="text-[10px] leading-snug text-slate-500">
+          Un seul Solo à la fois : s'il y en a un, seules cette piste (ou l'audio) sonnent.
+          Sans Solo, tout sonne sauf les pistes en Mute.
+        </p>
+      </div>
+    </aside>
+
+  </div>
 
   <script src="js/app.js"></script>
 </body>

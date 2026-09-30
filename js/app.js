@@ -34,7 +34,14 @@
         staveProfile: 'scoreTab'
       },
       player: {
-        playerMode: 'enabledAutomatic',          // auto → audio embarqué sinon synthé
+        // TOUJOURS le synthé. C'est lui qui porte le métronome, les niveaux
+        // par piste, le mute/solo et l'horloge maîtresse. L'audio embarqué
+        // est joué par NOTRE <audio> recadré sur lui (MixSync) : alphaTab ne
+        // le joue pas en mode synthé (`AlphaSynth.loadBackingTrack` = no-op).
+        // ⚠ `enabledAutomatic` résoudrait en EnabledBackingTrack pour un .gp
+        //   avec audio → alphaTab COUPERAIT le synthé (plus de MIDI ni de
+        //   métronome). Le choix de source a donc été supprimé de l'UI.
+        playerMode: 'enabledSynthesizer',
         soundFont:  `${AT_CDN}/soundfont/sonivox.sf3`,
         scrollElement: '#viewport',
         scrollMode: 'offscreen',
@@ -109,41 +116,17 @@
 
   /* ================== 2. AUDIO SYNC (<audio> caché) ================ */
   /*
-   *  Rôle : héberger un lecteur audio HTML5 "maison" et le brancher sur le
-   *  moteur alphaTab via l'interface `IExternalMediaHandler`.
+   *  Rôle : héberger le lecteur HTML5 de la piste audio embarquée, jouée en
+   *  ESCLAVE du synthé alphaTab (cf. MixSync) — alphaTab reste maître du
+   *  temps, on ne fait que coller notre <audio> dessus.
    *
-   *  Quand `settings.player.playerMode = 'enabledExternalMedia'` :
-   *    - alphaTab ne génère AUCUN son, il utilise uniquement notre audio
-   *      comme axe temporel ("time axis")
-   *    - alphaTab appelle  handler.seekTo()/play()/pause()  pour piloter l'audio
-   *    - nous, on lui renvoie la position via output.updatePosition(ms)
+   *  Le mode `enabledExternalMedia` d'alphaTab (IExternalMediaHandler) n'est
+   *  plus utilisé : le choix de source a été retiré de l'UI et le mode de
+   *  lecture est fixé à `enabledSynthesizer`.
    */
   const AudioSync = (() => {
     const audio = $('#externalAudio');
-    let output = null;          // ExternalMediaSynthOutput d'alphaTab
-    let url   = null;           // objectURL en cours
-
-    /* ---- Handler attendu par alphaTab (IExternalMediaHandler) ---- */
-    const handler = {
-      get backingTrackDuration() { return (isFinite(audio.duration) ? audio.duration : 0) * 1000; },
-      get playbackRate()         { return audio.playbackRate; },
-      set playbackRate(v)        { audio.playbackRate = v; },
-      get masterVolume()         { return audio.volume; },
-      set masterVolume(v)        { audio.volume = clamp(v, 0, 1); },
-      seekTo(timeMs)             { try { audio.currentTime = timeMs / 1000; } catch (e) {} },
-      play()                     { audio.play().catch(() => {}); },
-      pause()                    { audio.pause(); }
-    };
-
-    /* ---- Pousse la position audio vers alphaTab ------------------- */
-    function pushPosition() {
-      if (!output || typeof output.updatePosition !== 'function') return;
-      output.updatePosition(audio.currentTime * 1000);
-    }
-
-    /* ---- Branchement / débranchement ------------------------------ */
-    function attach(out)   { output = out; output.handler = handler; }
-    function detach()      { if (output) { try { output.handler = undefined; } catch (e) {} } output = null; }
+    let url = null;            // objectURL en cours
 
     function setSource(src) {
       if (url) URL.revokeObjectURL(url);
@@ -159,45 +142,10 @@
       }
     }
 
-    /* ---- Synchronisation (le cœur, volontairement commenté) --------
-     *
-     *  CAS 1 — Piloté par alphaTab (cas de la maquette) :
-     *  alphaTab est maître du temps. Il nous appelle en seekTo(), on notifie
-     *  simplement les changements de position pour que l'UI reste cohérente.
-     *  Aucune correction de dérive n'est nécessaire.
-     *
-     *  CAS 2 — "Horloge double" (audio audible + synthé MIDI muet) :
-     *  si tu veux entendre l'enregistrement tout en faisant définer le curseur
-     *  alphaTab, il faut surveiller la dérive et recaler l'audio :
-     *
-     *      function monitorDrift(api) {
-     *        const drift = Math.abs(api.timePosition - audio.currentTime * 1000);
-     *        if (drift > 300) {                        // seuil 300 ms
-     *          audio.currentTime = api.timePosition / 1000;
-     *        }
-     *      }
-     *      // appelé depuis api.playerPositionChanged (throttle ~250 ms)
-     *
-     *  CAS 3 — Recherche par tick (placeholder) :
-     *
-     *      function seekAudioToTick(api, tick) {
-     *        // 1. convertir tick → ms via api.tickCache / syncPoints
-     *      // 2. audio.currentTime = ms / 1000
-     *        // 3. api.tickPosition = tick      // recaler le curseur de partition
-     *      }
-     */
-    function syncToPlayer(/* api, tick */) {
-      // Placeholder CAS 3 — volontairement vide (voir commentaire ci-dessus).
-      pushPosition();
-    }
-
-    function init() {
-      audio.addEventListener('timeupdate', pushPosition);
-      audio.addEventListener('seeked',      pushPosition);
-      audio.addEventListener('ended',      pushPosition);
-    }
-
-    return { init, handler, attach, detach, setSource, pushPosition, syncToPlayer, element: audio };
+    /* ---- Synchronisation ----
+     *  alphaTab est maître du temps : MixSync (module 4) est l'unique
+     *  mécanisme de calage entre le synthé et notre <audio> ci-dessus. */
+    return { setSource, element: audio };
   })();
 
   /* ============== 3. EMBEDDED AUDIO (bonus JSZip) ================= */
@@ -479,19 +427,35 @@
       api: null,
       score: null,
       currentFile: null,
-      source: 'mix',
-      midiVolume: 0.85,
-      audioVolume: 1.0,
+      master: 0.85,        // Master (synthé MIDI)
+      audioVolume: 1.0,    // fader « Audio Track »
       metronomeVolume: 0.6,
       metronomeOn: false,
       loopOn: false,
       currentBar: 0,
       externalReady: false,
-      externalBlobUrl: null
+      externalBlobUrl: null,
+      mix: null,           // modèle du mélangeur (source de vérité)
+      perf: null           // chronomètre de chargement (journal console)
     };
+
+    /* -------- Modèle du mélangeur --------
+     *  Une SEULE structure pilote l'affichage ET l'écoute. Le DOM du tiroir
+     *  n'est qu'un reflet (App.refreshMixStates()) : aucune décision n'est
+     *  prise à partir d'une classe CSS. */
+    function createMix() {
+      S.mix = {
+        display:  'all',      // 'all'  | index de la seule piste affichée
+        solo:     null,       // null   | index de piste | 'audio'  → UN seul
+        muted:    new Set(),  // index des pistes en mute
+        vol:      new Map(),  // index -> niveau 0..1.5
+        audioMute: false
+      };
+    }
 
     /* -------- Initialisation alphaTab -------- */
     function init(container) {
+      createMix();                   // modèle de mixage vide, dispo tout de suite
       S.api = new alphaTab.AlphaTabApi(container, CFG.alphatab);
       wireEvents();
       return S.api;
@@ -501,16 +465,37 @@
       const api = S.api;
 
       api.scoreLoaded.on(score => safe(() => {
+        const t0 = performance.now();
+        if (S.perf) S.perf.scoreLoaded = Math.round(performance.now() - S.perf.t0);
         S.score = score;
+        createMix();                 // un modèle neuf pour ce score
         MixSync.suspend();
-        if (S.source === 'mix') {
-          MixSync.build(score);   // pont synthTime → syncTime
-          ensureMixAudio();       // branche le <audio> (async, sans toast)
-        }
-        App.onScoreLoaded(score);
-        applyVolumes();
-        refreshModeDependentUI();
+        App.onScoreLoaded(score);    // DOM du tiroir (léger)
+        seedMixVolumes();            // niveaux d'origine dans le modèle
+        refreshModeDependentUI();    // Master + volume audio
+        App.refreshMixStates();      // reflet du modèle (DOM seulement)
+        if (S.perf) S.perf.handler = Math.round(performance.now() - t0);
+
+        /* ⚠ PIÈGE DE CHARGEMENT — `_internalRenderTracks()` fait, EN SYNCHRONE
+           et dans CET ordre :
+               scoreLoaded  →  loadMidiForScore()  →  render()
+           donc TOUT ce qu'on fait ici s'exécute AVANT le premier dessin de la
+           partition.  On ne garde donc sur le chemin critique que le DOM ; le
+           pont audio (1 passe complète du score) et les canaux MIDI partent
+           en setTimeout(0), qui ne s'exécute qu'une fois la tâche courante —
+           donc le MIDI ET le rendu — entièrement terminés. */
+        deferAudioWork(score);
       })());
+
+      /* `loadMidiFile()` recrée l'état des canaux côté worker : on repasse le
+         modèle juste après (le moteur ne retient ni mute ni volume par piste).
+         NB : `readyForPlayback` (déclenché APRÈS `midiLoaded`) réécrit TOUS
+         les volumes à `playbackInfo.volume / 16` — d'où le 2ᵉ réflexe ci-dessous,
+         sinon nos faders sont écrasés à chaque chargement. */
+      api.midiLoaded.on(() => safe(applyMix)());
+      if (api.player && api.player.readyForPlayback) {
+        api.player.readyForPlayback.on(() => safe(applyMix)());
+      }
 
       api.error.on(err => safe(() => {
         console.error('[alphaTab]', err);
@@ -520,8 +505,10 @@
 
       // `renderFinished` = un rendu partiel ; `postRenderFinished` = rendu complet
       // (c'est lui qu'on attend pour révéler la partition).
-      api.renderFinished.on(() => safe(() => App.loader(false))());
-      api.postRenderFinished.on(() => safe(() => App.loader(false))());
+      // `renderFinished` = un rendu partiel (le score DEVIENT visible) ;
+      // `postRenderFinished` = rendu complet.
+      api.renderFinished.on(() => safe(() => { App.loader(false); markPaint(); })());
+      api.postRenderFinished.on(() => safe(() => { App.loader(false); markRender(); })());
 
       /* --- position / progression + calage de l'audio (mode Mix) --- */
       api.playerPositionChanged.on(e => safe(() => {
@@ -561,6 +548,7 @@
 
     /* -------- Chargement d'un fichier -------- */
     async function loadFile(file, label) {
+      S.perf = { t0: performance.now(), name: label || file.name, reported: false };
       App.loader(true, `Analyse de « ${label || file.name} »…`);
       App.armLoaderWatchdog(label || file.name);
       // On révèle #scoreArea AVANT le render pour qu'alphaTab mesure
@@ -570,9 +558,10 @@
       try {
         const buffer = await file.arrayBuffer();
         S.currentFile = file;
-        // La source choisie fixe le mode AVANT le load : sinon alphaTab résout
-        // `enabledAutomatic` → piste audio, et le synthé MIDI est coupé.
-        S.api.settings.player.playerMode = modeFor(S.source);
+        // Le mode de lecture est DÉFINITIF (CFG → enabledSynthesizer) : on ne
+        // le touche plus jamais, sinon alphaTab recrée le player et perd la
+        // position. `enabledAutomatic` couperait le synthé dès qu'il y a de
+        // l'audio embarqué — plus de métronome, ni de mute/solo, ni de volumes.
         // [-1] = toutes les pistes (comportement Guitar Pro par défaut)
         const ok = S.api.load(new Uint8Array(buffer), [-1]);
         if (!ok) throw new Error('Format non reconnu');
@@ -597,7 +586,6 @@
       const to    = range ? range.endTick   : S.api.endTick;
       if (to <= from) return;
       S.api.tickPosition = Math.round(from + (to - from) * clamp(r, 0, 1));
-      AudioSync.pushPosition();
       MixSync.resync();
     }
 
@@ -624,9 +612,13 @@
       if (S.metronomeOn) S.api.metronomeVolume = S.metronomeVolume;
     }
 
-    /* -------- Volumes (routés selon la source active) -------- */
-    function setMidiVolume(v)   { S.midiVolume   = clamp(v, 0, 1); applyVolumes(); }
-    function setAudioVolume(v)  { S.audioVolume  = clamp(v, 0, 1); applyVolumes(); }
+    /* -------- Volumes --------
+     *  • Master      → masterVolume du synthé MIDI
+     *  • Audio Track → volume de NOTRE <audio> (recadré par MixSync)
+     *  • Métronome   → métronome alphaTab (événement MIDI)
+     *  Il n'y a plus de « source » à router : le mode de lecture est fixe. */
+    function setMasterVolume(v) { S.master = clamp(v, 0, 1); applyVolumes(); }
+    function setAudioVolume(v)  { S.audioVolume = clamp(v, 0, 1); applyVolumes(); }
 
     function isSynthMode() {
       return S.api && S.api.actualPlayerMode === AT.PlayerMode.EnabledSynthesizer;
@@ -634,168 +626,179 @@
 
     function applyVolumes() {
       if (!S.api) return;
-      const mode = S.api.actualPlayerMode;
-      const usesAudio =
-        mode === AT.PlayerMode.EnabledBackingTrack ||
-        mode === AT.PlayerMode.EnabledExternalMedia;
-
-      // masterVolume pilote le synthé ; en mode Mix il pilote le MIDI seul
-      S.api.masterVolume = usesAudio ? S.audioVolume : S.midiVolume;
-      if (mode !== AT.PlayerMode.EnabledExternalMedia) {
-        AudioSync.element.volume = S.audioVolume;   // notre <audio> reste cohérent
-      }
-      App.updateSourceBadge(mode, usesAudio, S.source);
+      S.api.masterVolume = S.master;
+      // L'audio embarqué suit le mute/solo du mélangeur : on coupe le VOLUME
+      // (et pas le flux) pour que MixSync continue de piloter la position et
+      // de corriger la dérive.
+      AudioSync.element.volume = audioAudible() ? S.audioVolume : 0;
     }
 
-    /* Source demandée → playerMode alphaTab */
-    function modeFor(source) {
-      if (source === 'synth' || source === 'mix') return AT.PlayerMode.EnabledSynthesizer;
-      if (source === 'external') return AT.PlayerMode.EnabledExternalMedia;
-      return AT.PlayerMode.EnabledAutomatic;
-    }
-
-    /* -------- Préservation de la position à travers une bascule --------
-     * `_setupOrDestroyPlayer()` détruit puis recrée le player quand le mode
-     * change, et le nouveau player reçoit `loadMidiFile()` qui se termine
-     * par `this.tickPosition = 0`. Le `AlphaSynthWrapper` réapplique bien
-     * volume / vitesse / boucle, MAIS PAS `playbackRange` ni `tickPosition`.
+    /* ================= MÉLANGEUR =================
+     * alphaTab génère le MIDI de TOUTES les pistes du score : `renderTracks()`
+     * ne touche qu'à l'affichage, jamais à l'écoute. Le seul levier est donc
+     * les canaux (`changeTrackMute` / `changeTrackVolume`) — d'où un modèle
+     * central unique d'où dérive TOUT : affichage, mute, solo, niveaux.
      *
-     * → on capture avant, on restaure :
-     *    • immédiatement (si le player n'a pas été recréé, rien ne bouge)
-     *    • puis à nouveau DÉFÉRÉ à chaque `midiLoaded`, car le `tickPosition = 0`
-     *      de loadMidiFile() est exécuté juste après le déclenchement de
-     *      l'événement (sync) ou déjà passé côté worker (async) : dans les
-     *      deux cas un setTimeout(0) arrive pile après.
-     */
-    let restoreCtx = null;
-
-    function cancelRestore() {
-      if (restoreCtx && restoreCtx.finish) restoreCtx.finish();
-      restoreCtx = null;
+     *   • un solo actif → seuls ce solo (piste OU audio) sonne
+     *   • sinon         → tout sonne, sauf les pistes en mute
+     *
+     * ⚠ on ne passe JAMAIS par `changeTrackSolo()` d'alphaTab : son flag
+     *   global `_isAnySolo` se superposerait à nos mutes. */
+    function trackAudible(idx) {
+      const m = S.mix;
+      if (m.solo !== null) return m.solo === idx;   // solo unique gagne tout
+      return !m.muted.has(idx);
+    }
+    function audioAudible() {
+      const m = S.mix;
+      if (!m) return true;
+      if (m.solo !== null) return m.solo === 'audio';
+      return !m.audioMute;
     }
 
-    function barIndexForTick(tick) {
-      const bars = S.score ? S.score.masterBars : [];
-      for (let i = bars.length - 1; i >= 0; i--) if (bars[i].start <= tick) return i;
-      return 0;
+    /* Le fichier contient-il une piste audio jouable ? */
+    function hasEmbeddedAudio(score) {
+      return !!(score && score.backingTrack && score.backingTrack.rawAudioFile);
     }
 
-    function preservePosition(fn) {
-      const api = S.api;
-      if (!api) { cancelRestore(); fn(); return; }
-
-      // Si une bascule précédente n'est pas encore restaurée, la position
-      // lue dans le player n'est PAS la bonne : on reprend l'instantané.
-      const pending = (restoreCtx && !restoreCtx.done) ? restoreCtx.snap : null;
-      cancelRestore();
-
-      const snap = pending || {
-        tick:    api.tickPosition,
-        range:   api.playbackRange,
-        looping: api.isLooping,
-        playing: api.playerState === AT.PlayerState.Playing
-      };
-
-      const apply = () => {
-        try {
-          if (snap.range) {
-            const cur = api.playbackRange;
-            if (!cur || cur.startTick !== snap.range.startTick || cur.endTick !== snap.range.endTick) {
-              api.playbackRange = snap.range;
-            }
-          }
-          if (api.isLooping !== snap.looping) api.isLooping = snap.looping;
-          // ne pas faire de seek inutile (provoquerait un micro-saut audio)
-          if (snap.tick > 1 && Math.abs(api.tickPosition - snap.tick) > 1) {
-            api.tickPosition = snap.tick;
-          }
-          if (snap.playing && api.playerState !== AT.PlayerState.Playing) api.play();
-          if (S.score) {
-            S.currentBar = barIndexForTick(snap.tick);
-            $('#barLabel').textContent = `M. ${S.currentBar + 1}/${S.score.masterBars.length}`;
-          }
-        } catch (e) { console.warn('[source] restauration de position', e); }
-      };
-
-      const ctx    = { done: false, unreg: null, timer: 0, finish: null, snap: snap };
-      const finish = () => {
-        if (ctx.done) return;
-        ctx.done = true;
-        clearTimeout(ctx.timer);
-        if (ctx.unreg) ctx.unreg();
-        if (restoreCtx === ctx) restoreCtx = null;
-      };
-      ctx.finish = finish;
-
-      // Le mode effectivement résolu avant la bascule dit si le player sera
-      // recréé (→ nouveau `ready` → `loadMidiForScore()` → `tickPosition = 0`).
-      const prevMode = api.actualPlayerMode;
-      ctx.unreg = api.midiLoaded.on(() => setTimeout(() => { apply(); finish(); }, 0));
-      restoreCtx = ctx;
-
-      try {
-        fn();
-      } catch (e) {
-        finish();
-        throw e;
-      }
-
-      apply();   // « player non recréé » : la position est déjà la bonne
-
-      if (api.actualPlayerMode === prevMode) {
-        finish();                       // rien d'autre n'arrivera, on referme
-      } else {
-        // filet de sécurité si `midiLoaded` ne venait jamais
-        ctx.timer = setTimeout(() => {
-          if (snap.tick > 1 && Math.abs(api.tickPosition - snap.tick) > 1) apply();
-          finish();
-        }, 8000);
-      }
+    /* Niveau d'origine de la piste (playbackInfo.volume = 0..16). */
+    function defaultTrackVolume(t) {
+      const v = t.playbackInfo ? t.playbackInfo.volume / 16 : 1;
+      return clamp(isFinite(v) ? v : 1, 0, 1.5);
     }
 
-    /* -------- Source : auto / synthé / MIX / média externe -------- */
-    async function setSource(source) {
-      if (!S.api) return;
-      const prev   = S.source;
-      const revert = () => { $('#sourceSelect').value = prev; S.source = prev; };
+    /* Remplit le modèle avec les niveaux d'origine SANS toucher aux canaux
+       (alphaTab les met déjà à jour lui-même sur `readyForPlayback`). */
+    function seedMixVolumes() {
+      const m = S.mix;
+      if (!m || !S.score) return;
+      S.score.tracks.forEach(t => {
+        if (!m.vol.has(t.index)) m.vol.set(t.index, defaultTrackVolume(t));
+      });
+    }
 
-      const target = modeFor(source);
-
-      // 1. extraire l'audio embarqué AVANT toute bascule de mode
-      if (source === 'external' || source === 'mix') {
-        if (!S.score) {
-          App.toast('Chargez d\'abord un fichier Guitar Pro.', 'error');
-          revert(); return;
+    /* ---- Travaux lourds, DÉPORTÉS après le premier rendu ----
+     * `MixSync.build()` refait une passe complète du score
+     * (generateSyncPoints) et `ensureMixAudio()` copie le MP3 dans un Blob +
+     * l'ouvre dans <audio>. Aucun des deux n'est nécessaire pour AFFICHER la
+     * partition : les on met dans un setTimeout(0) planifié depuis
+     * `scoreLoaded`, donc exécuté après `loadMidiForScore()` + `render()`.
+     * Sans audio embarqué, on n'appelle rien du tout (gain majeur pour .gp5). */
+    function deferAudioWork(score) {
+      setTimeout(() => {
+        if (S.score !== score) return;          // un autre fichier a pris le relais
+        const t0 = performance.now();
+        if (hasEmbeddedAudio(score)) {
+          MixSync.build(score);                 // pont synthTime → syncTime
+          ensureMixAudio();                     // branche le <audio> (async, sans toast)
+          MixSync.onState(S.api && S.api.playerState);
         }
-        const ok = await prepareExternalAudio();
-        if (!ok) { revert(); return; }
-      }
-
-      // 2. bascule, en conservant la position courante
-      preservePosition(() => {
-        AudioSync.detach();
-        MixSync.stop();
-        S.source = source;
-
-        S.api.settings.player.playerMode = target;
-        S.api.updateSettings();
-
-        if (source === 'external') {
-          try {
-            AudioSync.attach(S.api.player.output);
-            S.api.masterVolume = S.audioVolume;
-          } catch (e) { console.warn(e); }
-        } else if (source === 'mix') {
-          MixSync.build(S.score);      // pont synthTime → syncTime
-          MixSync.start();             // <audio> actif, en esclave
-          MixSync.onState(S.api.playerState);
+        applyMix();                             // canaux : mute + volumes non-standard
+        if (S.perf) {
+          S.perf.deferred = Math.round(performance.now() - t0);
+          reportPerf();
         }
+      }, 0);
+    }
 
-        applyVolumes();
-        refreshModeDependentUI();
+    /* Chronomètre : une seule ligne en console pour savoir OÙ ça coûte. */
+    function markPaint() {
+      if (!S.perf || S.perf.paint !== undefined) return;
+      S.perf.paint = Math.round(performance.now() - S.perf.t0);
+    }
+    function markRender() {
+      if (!S.perf || S.perf.rendered !== undefined) return;
+      S.perf.rendered = Math.round(performance.now() - S.perf.t0);
+      reportPerf();
+    }
+    function reportPerf() {
+      const p = S.perf;
+      if (!p || p.reported) return;
+      if (p.rendered === undefined || p.deferred === undefined) return;  // les 2 bouts
+      p.reported = true;
+      console.log(
+        `[perf] « ${p.name} » → scoreLoaded +${p.scoreLoaded} ms ` +
+        `(handler mélangeur ${p.handler} ms) · 1ᵉʳ affichage +${p.paint ?? p.rendered} ms · ` +
+        `rendu complet +${p.rendered} ms · audio/canaux +${p.deferred} ms`
+      );
+    }
+
+    /* Applique le modèle complet en une passe. Idempotent.
+       Les appels alphaTab sont GROUPÉS : `changeTrackMute` refait un passage
+       complet des tracks à chaque appel (parseTracks → _trackIndexesToTracks),
+       on passe donc de 2N appels à 2 + autant de volumes non-standard. */
+    function applyMix(forceVolumes) {
+      if (!S.api || !S.score || !S.mix) return;
+      const m = S.mix;
+      const audible = [], silenced = [];
+      const customVol = new Map();      // niveau personnalisé → [tracks]
+
+      S.score.tracks.forEach(t => {
+        if (!m.vol.has(t.index)) m.vol.set(t.index, defaultTrackVolume(t));
+        (trackAudible(t.index) ? audible : silenced).push(t);
+
+        const v = m.vol.get(t.index);
+        if (forceVolumes || Math.abs(v - defaultTrackVolume(t)) > 1e-6) {
+          let g = customVol.get(v);
+          if (!g) { g = []; customVol.set(v, g); }
+          g.push(t);
+        }
       });
 
-      App.toast('Source : ' + $('#sourceSelect').selectedOptions[0].textContent, 'info');
+      if (audible.length)  S.api.changeTrackMute(audible, false);
+      if (silenced.length) S.api.changeTrackMute(silenced, true);
+      customVol.forEach((tracks, v) => S.api.changeTrackVolume(tracks, v));
+
+      applyVolumes();               // Master + volume de l'audio (mute/solo audio)
+      App.refreshMixStates();       // reflet DOM du modèle dans le tiroir
+    }
+
+    /* -------- Commandes du mélangeur --------
+     * Elles modifient le MODÈLE puis rappellent applyMix(). Le DOM ne donne
+     * jamais la réplique : il est re peint par refreshMixStates(). */
+    function showTrack(index) {
+      if (!S.score || !S.mix) return;
+      if (index !== 'all' && !S.score.tracks[index]) return;
+      S.mix.display = index;
+      S.api.renderTracks(
+        index === 'all' ? S.score.tracks.slice() : [S.score.tracks[index]]
+      );
+      App.refreshMixStates();
+    }
+    function toggleDisplay(idx) {
+      showTrack(S.mix.display === idx ? 'all' : idx);
+    }
+    function toggleTrackMute(idx) {
+      const m = S.mix;
+      if (m.muted.has(idx)) m.muted.delete(idx); else m.muted.add(idx);
+      applyMix();
+    }
+    function toggleTrackSolo(idx) {
+      const m = S.mix;
+      m.solo = (m.solo === idx) ? null : idx;   // un seul solo : remplace l'autre
+      applyMix();
+    }
+    function setTrackVolume(idx, v) {
+      S.mix.vol.set(idx, clamp(v, 0, 1.5));
+      applyMix();
+    }
+    function toggleAudioMute() {
+      S.mix.audioMute = !S.mix.audioMute;
+      applyMix();
+    }
+    function toggleAudioSolo() {
+      const m = S.mix;
+      m.solo = (m.solo === 'audio') ? null : 'audio';
+      applyMix();
+    }
+    /* Bouton « Réinit. mix » du tiroir : on garde l'affichage, on remet à zéro
+       l'écoute (mute / solo / niveaux). */
+    function resetMix() {
+      const display = S.mix ? S.mix.display : 'all';
+      createMix();
+      S.mix.display = display;
+      seedMixVolumes();
+      applyMix(true);   // forceVolumes : TOUS les niveaux reviennent à l'origine
     }
 
     /* Récupère le blob audio embarqué (sans le brancher).
@@ -825,27 +828,12 @@
       AudioSync.setSource(S.externalBlobUrl);
       return true;
     }
-
     /* Mode Mix : on branche l'audio dès qu'un score est chargé. */
     function ensureMixAudio() {
       return prepareExternalAudio(true).then(ok => {
         if (ok) { MixSync.start(); MixSync.onState(S.api && S.api.playerState); }
         return ok;
       }).catch(() => false);
-    }
-
-    /* -------- Pistes -------- */
-    function showTrack(index) {
-      if (!S.score) return;
-      const tracks = index === 'all' ? S.score.tracks.slice() : [S.score.tracks[index]];
-      S.api.renderTracks(tracks);
-    }
-    function setTrackMute(track, mute)  { S.api.changeTrackMute([track], mute); }
-    function setTrackSolo(track, solo)  { S.api.changeTrackSolo([track], solo); }
-    function resetChannels() {
-      if (!S.api.player) return;
-      S.api.player.resetChannelStates();
-      App.refreshTrackMuteStates();
     }
 
     /* -------- Boucle -------- */
@@ -899,8 +887,10 @@
       S, init, loadFile,
       play, pause, toggle, stop, seekRatio, gotoBar,
       setMetronome, setMetronomeVolume,
-      setMidiVolume, setAudioVolume, setSource,
-      showTrack, setTrackMute, setTrackSolo, resetChannels,
+      setMasterVolume, setAudioVolume,
+      // mélangeur : tout part du modèle S.mix
+      showTrack, toggleDisplay, toggleTrackMute, toggleTrackSolo, setTrackVolume,
+      toggleAudioMute, toggleAudioSolo, resetMix, applyMix,
       toggleLoop, setLoopRange, clearLoopRange,
       setLayout, setScrollMode, setSpeed, applyVolumes, isSynthMode
     };
@@ -1005,21 +995,8 @@
       $('#drawerScoreTitle').textContent = title;
       document.title = `${title} · GP8 Player`;
 
-      // sélecteur de pistes
-      const sel = $('#trackSelect');
-      sel.innerHTML = '';
-      const optAll = document.createElement('option');
-      optAll.value = 'all';
-      optAll.textContent = `Toutes les pistes (${score.tracks.length})`;
-      sel.appendChild(optAll);
-      score.tracks.forEach(t => {
-        const o = document.createElement('option');
-        o.value = String(t.index);
-        o.textContent = `${t.index + 1}. ${t.name || 'Piste ' + (t.index + 1)}`;
-        sel.appendChild(o);
-      });
-      sel.value = 'all';
-      sel.disabled = false;
+      // le mélangeur ne se remplit qu'une fois le score connu
+      $('#btnMixer').disabled = false;
 
       // boucle A/B
       fillBarSelect($('#loopStart'), score.masterBars.length);
@@ -1039,9 +1016,8 @@
       Player.S.currentBar = 0;
       $('#barLabel').textContent = `M. 1/${score.masterBars.length}`;
       toast(`« ${title} » chargé — ${score.tracks.length} piste(s), ${score.masterBars.length} mesures`, 'ok');
-
-      // badge : la source + la présence d'un audio sont posées par
-      // updateSourceBadge() appelé juste après via applyVolumes().
+      // le reflet du modèle (mute / solo / niveaux) est peint par applyMix(),
+      // appelé juste après par Player sur `scoreLoaded`.
     }
 
     function fillBarSelect(sel, count) {
@@ -1054,42 +1030,84 @@
       }
     }
 
+    /* ---------- mélangeur : construction des lignes ---------- */
+    const ICON = {
+      eye:  '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+      mute: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m22 9-6 6M16 9l6 6"/></svg>',
+      solo: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>'
+    };
+
+    function mixerRow(key, o) {
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-1.5 rounded-lg px-1 py-1.5 transition hover:bg-white/[.04]';
+      row.dataset.mix = String(key);
+      row.innerHTML = `
+        <span class="h-7 w-1.5 shrink-0 rounded-full" style="background:${o.color}"></span>
+        <span class="min-w-0 flex-1 truncate text-[12px] leading-tight text-slate-200"
+              title="${escapeHtml(o.title)}">${escapeHtml(o.label)}</span>
+        ${o.eye ? `<button class="mx-btn" data-act="eye"  title="Isoler cette piste à l'affichage (recliquer : tout afficher)">${ICON.eye}</button>` : ''}
+        <button class="mx-btn" data-act="mute" title="Mute : la piste ne sonne pas">${ICON.mute}</button>
+        <button class="mx-btn" data-act="solo" title="Solo : seul cela sonne (un seul à la fois)">${ICON.solo}</button>
+        <input class="mx-vol" type="range" min="0" max="${o.max || 150}" value="${o.value || 100}" title="Niveau (100 % = niveau d'origine)">`;
+      return row;
+    }
+
     function buildTrackList(score) {
       const list = $('#trackList');
       list.innerHTML = '';
-      score.tracks.forEach(t => {
-        const row = document.createElement('div');
-        row.className = 'mb-1.5 flex items-center gap-2 rounded-xl border border-white/5 bg-slate-800/60 px-3 py-2.5';
-        row.dataset.trackIndex = String(t.index);
-        row.innerHTML = `
-          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold"
-                style="background:${hexColor(t.color)}; color:#0b1220">${t.index + 1}</span>
-          <button class="flex-1 truncate text-left text-[13px] text-slate-200 hover:text-sky-300"
-                  title="Afficher cette piste">${escapeHtml(t.name || 'Piste ' + (t.index + 1))}</button>
-          <button class="btn-ctl h-7 min-w-7 text-[10px] font-bold btn-mute" title="Mute">M</button>
-          <button class="btn-ctl h-7 min-w-7 text-[10px] font-bold btn-solo" title="Solo">S</button>`;
 
-        row.querySelector('button').onclick = () => {
-          $('#trackSelect').value = String(t.index);
-          Player.showTrack(t.index);
-          closeDrawer();
-        };
-        row.querySelector('.btn-mute').onclick = e => {
-          const on = !e.currentTarget.classList.contains('is-on');
-          e.currentTarget.classList.toggle('is-on', on);
-          Player.setTrackMute(t, on);
-        };
-        row.querySelector('.btn-solo').onclick = e => {
-          const on = !e.currentTarget.classList.contains('is-on');
-          e.currentTarget.classList.toggle('is-on', on);
-          Player.setTrackSolo(t, on);
-        };
-        list.appendChild(row);
+      score.tracks.forEach(t => {
+        list.appendChild(mixerRow(t.index, {
+          color: hexColor(t.color),
+          label: `${t.index + 1}. ${t.name || 'Piste ' + (t.index + 1)}`,
+          title: t.name || 'Piste ' + (t.index + 1),
+          eye: true
+        }));
       });
+
+      // ★ ligne « Audio Track » : la piste audio embarquée joue EN PARALLÈLE
+      //   du synthé (MixSync la tient calée) — elle a donc son propre M/S.
+      //   Max 100 : HTMLMediaElement.volume est borné à [0;1] par le spec.
+      if (score.backingTrack && score.backingTrack.rawAudioFile) {
+        list.appendChild(mixerRow('audio', {
+          color: '#f59e0b',
+          label: 'Audio Track',
+          title: 'Piste audio embarquée dans le fichier',
+          eye: false,
+          max: 100,
+          value: Math.round(Player.S.audioVolume * 100)
+        }));
+      }
     }
 
-    function refreshTrackMuteStates() {
-      $$('.btn-mute, .btn-solo', $('#trackList')).forEach(b => b.classList.remove('is-on'));
+    /* ---------- mélangeur : reflet du modèle dans le DOM ----------
+     *  Le modèle (Player.S.mix) est la seule source de vérité : ici on ne
+     *  fait que repeindre les boutons et les faders. */
+    function refreshMixStates() {
+      const m = Player.S.mix;
+      if (!m) return;
+
+      $$('#trackList [data-mix]').forEach(row => {
+        const key = row.dataset.mix;
+        const audio = key === 'audio';
+        const idx = audio ? null : Number(key);
+
+        const eye = row.querySelector('[data-act="eye"]');
+        if (eye) eye.classList.toggle('is-on', m.display === 'all' || m.display === idx);
+
+        row.querySelector('[data-act="mute"]').classList.toggle(
+          'is-on', audio ? m.audioMute : m.muted.has(idx));
+        row.querySelector('[data-act="solo"]').classList.toggle(
+          'is-on', m.solo === (audio ? 'audio' : idx));
+
+        const slider = row.querySelector('.mx-vol');
+        if (slider) {
+          const v = audio ? Player.S.audioVolume : (m.vol.has(idx) ? m.vol.get(idx) : 1);
+          const pct = String(Math.round(v * 100));
+          if (slider.value !== pct) { slider.value = pct; }
+          paintRange(slider);
+        }
+      });
     }
 
     function escapeHtml(s) {
@@ -1143,34 +1161,37 @@
       return 0;
     }
 
-    function updateSourceBadge(mode, usesAudio, source) {
-      const badge = $('#sourceBadge');
-      const hint  = $('#volHint');
+    /* ---------- mélangeur : événements ----------
+     *  Délégation sur #trackList : le tiroir reste OUVERT pendant toute
+     *  interaction (il ne se ferme que sur ✕ ou Échap). */
+    function wireMixer() {
+      const list = $('#trackList');
 
-      if (source === 'mix') {
-        badge.textContent = 'Source : Mix (MIDI + audio)';
-        badge.className = 'rounded-full px-2 py-0.5 text-[10px] font-semibold border border-sky-500/40 bg-sky-500/10 text-sky-300';
-        hint.textContent = 'Le synthé MIDI est maître du temps (métronome, mute/solo, boucle, curseur) ; la piste audio embarquée est recadrée en continu pour rester calée dessus. « MIDI » = synthé, « Audio » = piste.';
-      } else if (mode === AT.PlayerMode.EnabledBackingTrack) {
-        badge.textContent = 'Source : audio embarqué';
-        hint.textContent = 'La piste audio intégrée est active → le curseur MIDI et le métronome sont désactivés. Le slider « Audio » pilote le volume.';
-      } else if (mode === AT.PlayerMode.EnabledExternalMedia) {
-        badge.textContent = 'Source : <audio> externe';
-        hint.textContent = 'Notre balise <audio> pilote le temps. Le synthé MIDI est muet → slider « Audio » actif.';
-      } else if (mode === AT.PlayerMode.EnabledSynthesizer) {
-        badge.textContent = 'Source : synthé MIDI';
-        hint.textContent = 'Synthèse MIDI (soundfont) → métronome, volumes par piste et boucle actifs. Slider « MIDI » actif.';
-      } else {
-        badge.textContent = 'Source : —';
-        hint.textContent = '—';
-      }
+      list.addEventListener('click', e => {
+        const btn = e.target.closest('[data-act]');
+        if (!btn) return;
+        const row = btn.closest('[data-mix]');
+        if (!row) return;
+        const key   = row.dataset.mix;
+        const audio = key === 'audio';
+        const idx   = audio ? null : Number(key);
+        const act   = btn.dataset.act;
 
-      // info complémentaire : le fichier contient-il une piste audio ?
-      const score = Player.S.score;
-      if (score) {
-        const hasAudio = !!(score.backingTrack && score.backingTrack.rawAudioFile);
-        badge.textContent += hasAudio ? ' · audio ✓' : ' · pas d\'audio';
-      }
+        if (act === 'eye')       { if (!audio) Player.toggleDisplay(idx); }
+        else if (act === 'mute') { if (audio) Player.toggleAudioMute(); else Player.toggleTrackMute(idx); }
+        else if (act === 'solo') { if (audio) Player.toggleAudioSolo(); else Player.toggleTrackSolo(idx); }
+      });
+
+      list.addEventListener('input', e => {
+        const slider = e.target.closest('.mx-vol');
+        if (!slider) return;
+        paintRange(slider);
+        const row = slider.closest('[data-mix]');
+        if (!row) return;
+        const v = +slider.value / 100;
+        if (row.dataset.mix === 'audio') Player.setAudioVolume(v);
+        else Player.setTrackVolume(Number(row.dataset.mix), v);
+      });
     }
 
     /* ---------- range painting (progression lue à l'œil) ---------- */
@@ -1183,14 +1204,31 @@
       $$('input[type=range]').forEach(paintRange);
     }
 
-    /* ---------- drawer ---------- */
+    /* ---------- drawer : PART DU FLUX, il ne recouvre rien ----------
+     *  Le tiroir est un membre du flex #stage : s'ouvrir l'agrandit et
+     *  #viewport se rétracte. Aucun backdrop — la fermeture est manuelle
+     *  (✕ ou Échap) et AUCUNE interaction avec le contenu ne le referme. */
     function openDrawer() {
-      $('#drawer').classList.remove('translate-x-full');
-      $('#drawerBackdrop').classList.remove('hidden');
+      document.body.classList.add('drawer-open');
+      syncDrawerBtn();
+      reflowScore();
     }
     function closeDrawer() {
-      $('#drawer').classList.add('translate-x-full');
-      $('#drawerBackdrop').classList.add('hidden');
+      document.body.classList.remove('drawer-open');
+      syncDrawerBtn();
+      reflowScore();
+    }
+    function toggleDrawer() {
+      if (document.body.classList.contains('drawer-open')) closeDrawer(); else openDrawer();
+    }
+    function syncDrawerBtn() {
+      const b = $('#btnMixer');
+      if (b) b.classList.toggle('is-on', document.body.classList.contains('drawer-open'));
+    }
+    /* alphaTab re-mesure son conteneur quand la largeur change ; on relance
+       le layout à la main au cas où le ResizeObserver ne se déclencherait pas. */
+    function reflowScore() {
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 90);
     }
 
     /* ---------- drag & drop ---------- */
@@ -1276,20 +1314,18 @@
       p.addEventListener('change', () => { Player.seekRatio(+p.value / 1000); scrubbing = false; });
       p.addEventListener('pointerup',   () => scrubbing = false);
 
-      // pistes
-      $('#trackSelect').onchange = e => {
-        const v = e.target.value;
-        Player.showTrack(v === 'all' ? 'all' : Number(v));
-      };
+      // mélangeur : ouverture / fermeture manuelle (aucune interaction
+      // avec le contenu ne referme le tiroir)
+      $('#btnMixer').onclick  = toggleDrawer;
+      $('#drawerClose').onclick = closeDrawer;
+      $('#btnAllTracks').onclick = () => Player.showTrack('all');
+      $('#btnResetMix').onclick  = () => Player.resetMix();
+      wireMixer();                       // clics & faders délégués sur #trackList
 
-      // volumes / vitesse
-      $('#volMidi').addEventListener('input', e => {
-        paintRange(e.target); $('#volMidiVal').textContent = e.target.value;
-        Player.setMidiVolume(+e.target.value / 100);
-      });
-      $('#volAudio').addEventListener('input', e => {
-        paintRange(e.target); $('#volAudioVal').textContent = e.target.value;
-        Player.setAudioVolume(+e.target.value / 100);
+      // niveaux du tiroir + vitesse
+      $('#volMaster').addEventListener('input', e => {
+        paintRange(e.target); $('#volMasterVal').textContent = e.target.value;
+        Player.setMasterVolume(+e.target.value / 100);
       });
       $('#volClick').addEventListener('input', e => {
         paintRange(e.target); $('#volClickVal').textContent = e.target.value;
@@ -1300,9 +1336,6 @@
         Player.setSpeed(+e.target.value / 100);
       });
 
-      // source
-      $('#sourceSelect').onchange = e => Player.setSource(e.target.value);
-
       // boucle A/B
       $('#btnApplyLoop').onclick = () => Player.setLoopRange(+$('#loopStart').value, +$('#loopEnd').value);
       $('#btnClearLoop').onclick = () => Player.clearLoopRange();
@@ -1310,20 +1343,6 @@
       // affichage
       $('#layoutSelect').onchange = e => { layoutTouched = true; Player.setLayout(e.target.value); };
       $('#scrollSelect').onchange = e => Player.setScrollMode(e.target.value);
-
-      // drawer : bouton "liste des pistes" ajouté à côté du select
-      $('#drawerClose').onclick   = closeDrawer;
-      $('#drawerBackdrop').onclick = closeDrawer;
-      $('#btnAllTracks').onclick  = () => { $('#trackSelect').value = 'all'; Player.showTrack('all'); };
-      $('#btnResetChannels').onclick = () => Player.resetChannels();
-
-      // afficher le drawer depuis le select (icône liste ajoutée dynamiquement)
-      const listBtn = document.createElement('button');
-      listBtn.className = 'btn-ctl';
-      listBtn.title = 'Toutes les pistes (liste)';
-      listBtn.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg>';
-      listBtn.onclick = openDrawer;
-      $('#trackSelect').insertAdjacentElement('afterend', listBtn);
 
       // responsive
       mqDesktop.addEventListener('change', applyResponsiveLayout);
@@ -1335,7 +1354,6 @@
         document.body.innerHTML = '<div style="padding:40px;font-family:sans-serif">Impossible de charger alphaTab (CDN injoignable).</div>';
         return;
       }
-      AudioSync.init();
       buildSamples();
       wireUI();
       wireDnD();
@@ -1360,8 +1378,8 @@
     return {
       boot, toast, loader, armLoaderWatchdog, hideEmptyState, showEmptyState,
       onScoreLoaded, updatePosition,
-      syncPlayBadge, syncMetronome, syncLoop, onPlaybackRange, updateSourceBadge,
-      refreshTrackMuteStates, openDrawer, closeDrawer
+      syncPlayBadge, syncMetronome, syncLoop, onPlaybackRange,
+      refreshMixStates, openDrawer, closeDrawer
     };
   })();
 
