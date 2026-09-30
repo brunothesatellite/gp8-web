@@ -629,6 +629,105 @@
       return AT.PlayerMode.EnabledAutomatic;
     }
 
+    /* -------- Préservation de la position à travers une bascule --------
+     * `_setupOrDestroyPlayer()` détruit puis recrée le player quand le mode
+     * change, et le nouveau player reçoit `loadMidiFile()` qui se termine
+     * par `this.tickPosition = 0`. Le `AlphaSynthWrapper` réapplique bien
+     * volume / vitesse / boucle, MAIS PAS `playbackRange` ni `tickPosition`.
+     *
+     * → on capture avant, on restaure :
+     *    • immédiatement (si le player n'a pas été recréé, rien ne bouge)
+     *    • puis à nouveau DÉFÉRÉ à chaque `midiLoaded`, car le `tickPosition = 0`
+     *      de loadMidiFile() est exécuté juste après le déclenchement de
+     *      l'événement (sync) ou déjà passé côté worker (async) : dans les
+     *      deux cas un setTimeout(0) arrive pile après.
+     */
+    let restoreCtx = null;
+
+    function cancelRestore() {
+      if (restoreCtx && restoreCtx.finish) restoreCtx.finish();
+      restoreCtx = null;
+    }
+
+    function barIndexForTick(tick) {
+      const bars = S.score ? S.score.masterBars : [];
+      for (let i = bars.length - 1; i >= 0; i--) if (bars[i].start <= tick) return i;
+      return 0;
+    }
+
+    function preservePosition(fn) {
+      const api = S.api;
+      if (!api) { cancelRestore(); fn(); return; }
+
+      // Si une bascule précédente n'est pas encore restaurée, la position
+      // lue dans le player n'est PAS la bonne : on reprend l'instantané.
+      const pending = (restoreCtx && !restoreCtx.done) ? restoreCtx.snap : null;
+      cancelRestore();
+
+      const snap = pending || {
+        tick:    api.tickPosition,
+        range:   api.playbackRange,
+        looping: api.isLooping,
+        playing: api.playerState === AT.PlayerState.Playing
+      };
+
+      const apply = () => {
+        try {
+          if (snap.range) {
+            const cur = api.playbackRange;
+            if (!cur || cur.startTick !== snap.range.startTick || cur.endTick !== snap.range.endTick) {
+              api.playbackRange = snap.range;
+            }
+          }
+          if (api.isLooping !== snap.looping) api.isLooping = snap.looping;
+          // ne pas faire de seek inutile (provoquerait un micro-saut audio)
+          if (snap.tick > 1 && Math.abs(api.tickPosition - snap.tick) > 1) {
+            api.tickPosition = snap.tick;
+          }
+          if (snap.playing && api.playerState !== AT.PlayerState.Playing) api.play();
+          if (S.score) {
+            S.currentBar = barIndexForTick(snap.tick);
+            $('#barLabel').textContent = `M. ${S.currentBar + 1}/${S.score.masterBars.length}`;
+          }
+        } catch (e) { console.warn('[source] restauration de position', e); }
+      };
+
+      const ctx    = { done: false, unreg: null, timer: 0, finish: null, snap: snap };
+      const finish = () => {
+        if (ctx.done) return;
+        ctx.done = true;
+        clearTimeout(ctx.timer);
+        if (ctx.unreg) ctx.unreg();
+        if (restoreCtx === ctx) restoreCtx = null;
+      };
+      ctx.finish = finish;
+
+      // Le mode effectivement résolu avant la bascule dit si le player sera
+      // recréé (→ nouveau `ready` → `loadMidiForScore()` → `tickPosition = 0`).
+      const prevMode = api.actualPlayerMode;
+      ctx.unreg = api.midiLoaded.on(() => setTimeout(() => { apply(); finish(); }, 0));
+      restoreCtx = ctx;
+
+      try {
+        fn();
+      } catch (e) {
+        finish();
+        throw e;
+      }
+
+      apply();   // « player non recréé » : la position est déjà la bonne
+
+      if (api.actualPlayerMode === prevMode) {
+        finish();                       // rien d'autre n'arrivera, on referme
+      } else {
+        // filet de sécurité si `midiLoaded` ne venait jamais
+        ctx.timer = setTimeout(() => {
+          if (snap.tick > 1 && Math.abs(api.tickPosition - snap.tick) > 1) apply();
+          finish();
+        }, 8000);
+      }
+    }
+
     /* -------- Source : auto / synthé / MIX / média externe -------- */
     async function setSource(source) {
       if (!S.api) return;
@@ -647,29 +746,30 @@
         if (!ok) { revert(); return; }
       }
 
-      // 2. couper proprement ce qui tournait encore
-      AudioSync.detach();
-      MixSync.stop();
-      S.source = source;
+      // 2. bascule, en conservant la position courante
+      preservePosition(() => {
+        AudioSync.detach();
+        MixSync.stop();
+        S.source = source;
 
-      // 3. bascule de mode (alphaTab recrée le player si nécessaire)
-      S.api.settings.player.playerMode = target;
-      S.api.updateSettings();
+        S.api.settings.player.playerMode = target;
+        S.api.updateSettings();
 
-      // 4. rebrancher
-      if (source === 'external') {
-        try {
-          AudioSync.attach(S.api.player.output);
-          S.api.masterVolume = S.audioVolume;
-        } catch (e) { console.warn(e); }
-      } else if (source === 'mix') {
-        MixSync.build(S.score);      // pont synthTime → syncTime
-        MixSync.start();             // <audio> actif, en esclave
-        MixSync.onState(S.api.playerState);
-      }
+        if (source === 'external') {
+          try {
+            AudioSync.attach(S.api.player.output);
+            S.api.masterVolume = S.audioVolume;
+          } catch (e) { console.warn(e); }
+        } else if (source === 'mix') {
+          MixSync.build(S.score);      // pont synthTime → syncTime
+          MixSync.start();             // <audio> actif, en esclave
+          MixSync.onState(S.api.playerState);
+        }
 
-      applyVolumes();
-      refreshModeDependentUI();
+        applyVolumes();
+        refreshModeDependentUI();
+      });
+
       App.toast('Source : ' + $('#sourceSelect').selectedOptions[0].textContent, 'info');
     }
 
