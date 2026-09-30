@@ -1,0 +1,91 @@
+  /* =========================================================
+     THEME & UI
+     ========================================================= */
+  :root{
+    --transport-bg: rgba(15,23,42,.92);
+    --sheet: #ffffff;
+  }
+  html, body { -webkit-tap-highlight-color: transparent; }
+  body { font-family: Inter, system-ui, "Segoe UI", sans-serif; }
+
+  /* La partition = une feuille blanche posée dans une pièce sombre */
+  #viewport { background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(14,165,233,.10), transparent 60%),
+      #020617; }
+  #scoreArea { background: var(--sheet); }
+
+  /* Scrollbars discrètes */
+  #viewport::-webkit-scrollbar, .thin-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+  #viewport::-webkit-scrollbar-thumb, .thin-scroll::-webkit-scrollbar-thumb {
+    background: rgba(148,163,184,.35); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
+  #viewport::-webkit-scrollbar-track { background: transparent; }
+
+  /* =========================================================
+     alphaTab : curseur de lecture / sélection / highlighting
+     (alphaTab ne fournit AUCUN style par défaut → on les pose ici)
+     ========================================================= */
+  .at-cursor-bar   { background: rgba(56,189,248,.16) !important; border-radius: 2px; }
+  .at-cursor-beat  { background: #0ea5e9 !important; box-shadow: 0 0 8px rgba(14,165,233,.7); }
+  .at-selection    { background: rgba(250,204,21,.30) !important; border-radius: 2px; }
+  .at-highlight    { /* éléments de la mesure jouée en surbrillance */ }
+
+  /* =========================================================
+     SLIDERS (volume / vitesse / progression)
+     ========================================================= */
+  input[type=range]{
+    -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track{
+    height: 4px; border-radius: 99px;
+    background: linear-gradient(to right, #0ea5e9 var(--pct,50%), rgba(148,163,184,.30) var(--pct,50%));
+  }
+  input[type=range]::-moz-range-track{ height: 4px; border-radius: 99px; background: rgba(148,163,184,.30); }
+  input[type=range]::-moz-range-progress{ height: 4px; border-radius: 99px; background: #0ea5e9; }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: -5px;
+    border-radius: 99px; background: #e2e8f0; border: 2px solid #0ea5e9;
+    box-shadow: 0 1px 4px rgba(0,0,0,.5); transition: transform .1s;
+  }
+  input[type=range]:active::-webkit-slider-thumb{ transform: scale(1.25); }
+  input[type=range]::-moz-range-thumb{
+    width: 12px; height: 12px; border-radius: 99px; background: #e2e8f0; border: 2px solid #0ea5e9;
+  }
+  #progress::-webkit-slider-runnable-track{ height: 6px; }
+  #progress::-webkit-slider-thumb{ width: 16px; height: 16px; margin-top: -5px; }
+
+  /* =========================================================
+     PANNEAU AVANCÉ : replié sur mobile, toujours visible ≥ 768px
+     ========================================================= */
+  #advanced { display: none; }
+  body.adv-open #advanced { display: grid; }
+  @media (min-width: 768px){
+    #advanced { display: grid !important; }
+    #btnMore  { display: none !important; }
+  }
+
+  .kbd{
+    font: 600 10px/1 ui-monospace, monospace; padding: 3px 5px; border-radius: 4px;
+    background: rgba(148,163,184,.15); border: 1px solid rgba(148,163,184,.25); color:#cbd5e1;
+  }
+  .btn-ctl{
+    display:inline-flex; align-items:center; justify-content:center;
+    height:38px; min-width:38px; padding:0 9px; border-radius:10px;
+    background: rgba(30,41,59,.9); border:1px solid rgba(148,163,184,.18);
+    color:#e2e8f0; transition:.15s; user-select:none;
+  }
+  .btn-ctl:hover{ background: rgba(51,65,85,.95); border-color: rgba(148,163,184,.35); }
+  .btn-ctl:active{ transform: translateY(1px); }
+  .btn-ctl.is-on{ background: rgba(14,165,233,.20); border-color: rgba(56,189,248,.65); color:#7dd3fc; }
+  .btn-ctl:disabled{ opacity:.38; cursor:not-allowed; }
+  .btn-primary{
+    height:44px; min-width:52px; border-radius:12px;
+    background: linear-gradient(180deg,#0ea5e9,#0284c7); border:1px solid rgba(56,189,248,.5);
+    color:#fff; box-shadow: 0 4px 14px rgba(2,132,199,.35);
+  }
+  .btn-primary:hover{ filter:brightness(1.08); }
+  .field{
+    background: rgba(30,41,59,.9); border:1px solid rgba(148,163,184,.22);
+    color:#e2e8f0; border-radius:9px; height:34px; padding:0 8px; font-size:13px; outline:none;
+  }
+  .field:focus{ border-color:#0ea5e9; box-shadow:0 0 0 3px rgba(14,165,233,.2); }
+  .lbl{ font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:#94a3b8; font-weight:700; }
