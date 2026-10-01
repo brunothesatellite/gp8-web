@@ -123,7 +123,46 @@
       patchVendorMidiInfo(S.api._player || S.api.player);
       patchVendorClickKeepsLoop();
       wireEvents();
+      applyScrollOffsets();
+      watchScrollSize();
       return S.api;
+    }
+
+    /* -------- Décalage du défilement --------
+       Tous les scroll handlers d'alphaTab ciblent `barX + scrollOffsetX`
+       (et `cursorX + scrollOffsetX` en Smooth, l.44941/44947) : avec
+       l'offset par défaut (0) la mesure courante est calée PILE sur le
+       bord gauche du conteneur, et la barre du curseur — quelques pixels —
+       tombe en x=0 : elle disparaît. Un offset NÉGATIF arrête le défilement
+       plus tôt, la mesure reste visible et décalée vers la droite ; en
+       Smooth le curseur devient alors parfaitement fixe (la feuille
+       défile sous une tête de lecture immobile). */
+    function applyScrollOffsets() {
+      const api = S.api;
+      if (!api) return;
+      const el = $(CFG.scrollElement);
+      const w = el ? el.clientWidth  : 0;
+      const h = el ? el.clientHeight : 0;
+      api.settings.player.scrollOffsetX = w > 0 ? -Math.round(w * 0.30) : 0;
+      api.settings.player.scrollOffsetY = h > 0 ? -Math.round(h * 0.15) : 0;
+    }
+
+    /* le conteneur change aussi quand le tiroir s'ouvre : ResizeObserver
+       plutôt que `resize` (qui ne voit que la fenêtre) */
+    let scrollWatchBound = false;
+    function watchScrollSize() {
+      if (scrollWatchBound) return;
+      scrollWatchBound = true;
+      const el = $(CFG.scrollElement);
+      if (typeof ResizeObserver === 'function' && el) {
+        let raf = 0;
+        new ResizeObserver(() => {
+          if (raf) return;
+          raf = requestAnimationFrame(() => { raf = 0; applyScrollOffsets(); });
+        }).observe(el);
+      } else {
+        window.addEventListener('resize', () => applyScrollOffsets());
+      }
     }
 
     /* ---- alphaTab : un clic ne doit PAS effacer la boucle ----

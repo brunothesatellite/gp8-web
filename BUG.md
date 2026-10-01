@@ -7,7 +7,7 @@
 * N/A
 
 # MINOR
-* Dans la sélection de la vitesse, indiquer le BPM d'origine et adapté à la vitesse
+* Dans la sélection de la vitesse, indiquer le BPM d'origine du fichier .GP et adapté à la vitesse
 
 # EVOLUTIONS
 * ajouter un visuel pour la piste audio (forme d'onde)
