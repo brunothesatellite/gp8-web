@@ -140,7 +140,7 @@
         <span class="lbl">Lecture</span>
         <label class="flex items-center gap-3">
           <span class="w-14 shrink-0 text-[11px] text-slate-400">Vitesse</span>
-          <input id="speed" type="range" min="40" max="150" value="100" class="flex-1">
+          <input id="speed" type="range" min="40" max="150" value="100" class="flex-1 min-w-0">
           <span id="speedVal" class="w-[104px] shrink-0 text-right font-mono text-[11px] text-slate-500">100%</span>
         </label>
         <p class="text-[10.5px] leading-snug text-slate-500">
@@ -153,9 +153,9 @@
       <section class="space-y-2.5">
         <span class="lbl">Boucle A → B <span class="normal-case tracking-normal text-slate-500">(ou glissez sur la partition)</span></span>
         <div class="flex items-center gap-2">
-          <select id="loopStart" class="field flex-1" disabled><option value="-1">Début —</option></select>
+          <select id="loopStart" class="field flex-1 min-w-0" disabled><option value="-1">Début —</option></select>
           <span class="text-slate-600">→</span>
-          <select id="loopEnd" class="field flex-1" disabled><option value="-1">Fin —</option></select>
+          <select id="loopEnd" class="field flex-1 min-w-0" disabled><option value="-1">Fin —</option></select>
         </div>
         <div class="flex gap-2">
           <button id="btnApplyLoop" class="btn-ctl h-8 flex-1 text-xs" disabled>Appliquer</button>
@@ -171,7 +171,7 @@
         <span class="lbl">Affichage</span>
         <label class="flex items-center gap-3">
           <span class="w-14 shrink-0 text-[11px] text-slate-400">Layout</span>
-          <select id="layoutSelect" class="field flex-1">
+          <select id="layoutSelect" class="field flex-1 min-w-0">
             <option value="horizontal">Horizontal (1 système/ligne)</option>
             <option value="page">Page (barres en grille)</option>
             <option value="parchment">Parchment (mise en page GP)</option>
@@ -179,7 +179,7 @@
         </label>
         <label class="flex items-center gap-3">
           <span class="w-14 shrink-0 text-[11px] text-slate-400">Suivi</span>
-          <select id="scrollSelect" class="field flex-1">
+          <select id="scrollSelect" class="field flex-1 min-w-0">
             <option value="offscreen">Défiler hors écran</option>
             <option value="continuous">Défilement continu</option>
             <option value="smooth" hidden>Défilement doux</option>
