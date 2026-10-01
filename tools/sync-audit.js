@@ -286,9 +286,24 @@ function buildJumpAt(raw) {
 }
 
 /* ============================== main =============================== */
+/* MIROIR de player.js fixEmptyAnacrusis — remet sur la timeline une mesure
+   "anacrusis" (pickup) vide qu'alphaTab réduit à 0 tick. */
+function fixEmptyAnacrusis(score) {
+  const mbs = score && score.masterBars;
+  if (!mbs || !mbs.length) return false;
+  let changed = false;
+  for (const mb of mbs) {
+    if (mb.isAnacrusis && mb.calculateDuration() === 0) { mb.isAnacrusis = false; changed = true; }
+  }
+  if (!changed) return false;
+  for (let i = 1; i < mbs.length; i++) mbs[i].start = mbs[i - 1].start + mbs[i - 1].calculateDuration();
+  return true;
+}
+
 function runOne(at, gpPath) {
   const bytes = new Uint8Array(fs.readFileSync(gpPath));
   const score = at.importer.ScoreLoader.loadScoreFromBytes(bytes, new at.Settings());
+  fixEmptyAnacrusis(score);            // MIROIR de player.js (mesures vides/pickup)
   const gen   = at.midi.MidiFileGenerator.generateSyncPoints(score) || [];
   const raw   = gen.filter(p => p && isFinite(p.synthTime) && isFinite(p.syncTime))
                    .map(p => ({ t: p.synthTime, a: p.syncTime }))

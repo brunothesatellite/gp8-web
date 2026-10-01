@@ -211,6 +211,7 @@
         nLayout = 0; nPaint = 0;
         trace('scoreLoaded', `${score.tracks.length} pistes · ${score.masterBars.length} mesures`);
         S.score = score;
+        fixEmptyAnacrusis(score);       // mesures vides/pickup remises sur la timeline
         createMix();                 // un modèle neuf pour ce score
         MixSync.suspend();
         App.onScoreLoaded(score);    // DOM du tiroir (léger)
@@ -529,6 +530,31 @@
     function defaultTrackVolume(t) {
       const v = t.playbackInfo ? t.playbackInfo.volume / 16 : 1;
       return clamp(isFinite(v) ? v : 1, 0, 1.5);
+    }
+
+    /* ---- Correctif BUGMP3 : mesures vides / pickup escamotées ----
+       Un « anacrusis » (mesure avant la n°1) est réduit à 0 tick par alphaTab
+       (isAnacrusis → calculateDuration 0, et la mesure suivante repart au même
+       tick). La mesure — et son audio — est alors escamotée, et la durée totale
+       raccourcie. On la remet en mesure normale : elle prend sa durée complète
+       et les ticks des mesures suivantes sont recalculés. Idem pour toute mesure
+       « vide » (0 note) réduite à 0 tick. À appeler APRÈS le parse, AVANT la
+       génération MIDI et le pont de synchro. */
+    function fixEmptyAnacrusis(score) {
+      const mbs = score && score.masterBars;
+      if (!mbs || !mbs.length) return false;
+      let changed = false;
+      for (const mb of mbs) {
+        if (mb.isAnacrusis && mb.calculateDuration() === 0) {
+          mb.isAnacrusis = false;
+          changed = true;
+        }
+      }
+      if (!changed) return false;
+      for (let i = 1; i < mbs.length; i++) {
+        mbs[i].start = mbs[i - 1].start + mbs[i - 1].calculateDuration();
+      }
+      return true;
     }
 
     /* Remplit le modèle avec les niveaux d'origine SANS toucher aux canaux

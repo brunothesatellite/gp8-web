@@ -1,4 +1,7 @@
 # CRITICAL
+* Corriger le bug de fond identifié avec ACDC
+* Blink 182 - All the Small thinks : les renvois multiples (1,2,3 puis 4) sont mal gérés : mesures 
+6-7-8-9 => renvoi en 6 pour la première itération OK, puis 7-8 et 9 (KO) et 10 (KO) ! Selon la partition on devrait faire 6-7-8-9 6-7-8-9 6-7-8-9 6-7-8-10 (si tu as corrigé la première mesure vides dans un autre bug avec le traitement de isAnacrusis, ce sera plutôt avec les bonnes numérotations Guitar Pro 5-6-7-8 5-6-7-8 5-6-7-8 5-6-7-9)
 * **FIXED (01/10/2026)** Problème dans la lecture de la piste audio, lorsqu'il y a un retour important.
 ACDC (1979 - Highway to Hell) - Highway to Hell-ref.gp
 à la fin de la mesure 17 vers 1:03, il y DS Al Coda qui renvoi à la mesure 6 (c'est normal, c'est le fonctionnement de la partition), mais cela fait sauter l'audio.
@@ -20,7 +23,7 @@ Helloween (1988 - Keeper of the Seven Keys - Part II) - Dr. Stein.gp : je lance 
 > légèrement décalée (occurrences `BarOccurrence` perdues côté alphaTab) — voir §11.
 
 # MAJOR
-* **HIGH - LOW RISK** en mode paysage ou portrait sur android, garantir qu'on voit toujours au moins une piste dans le tiroir de piste
+* **HIGH - LOW RISK** en mode paysage ou portrait sur android, garantir que l'on voit toutes les pistes dans le tiroir Melangeur de piste : supprimer le scrollbar sur la liste des pistes dans le tiroir au profit d'une tiroir Melange swipable verticalement dans son intégralité car parfois un voit à peine un bout de piste en mode horizontal.
 
 # MINOR
 * N/A
