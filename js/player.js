@@ -21,6 +21,7 @@
       countInOn: false,
       playing: false,
       loopOn: false,
+      userSpeed: 1.0,      // vitesse utilisateur (× tempoScale → playbackSpeed)
       loopRange: null,       // plage A→B en cours (modèle local = vérité)
       currentBar: 0,
       externalReady: false,
@@ -553,6 +554,7 @@
         const t0 = performance.now();
         if (hasEmbeddedAudio(score)) {
           MixSync.build(score);                 // pont synthTime → syncTime
+          applySpeed();                         // tempoScale → MIDI au modified tempo
           ensureMixAudio();                     // branche le <audio> (async, sans toast)
           MixSync.onState(S.api && S.api.playerState);
         }
@@ -814,7 +816,18 @@
       S.api.settings.player.scrollMode = scrollId(mode);
       S.api.updateSettings();
     }
-    function setSpeed(pct) { S.api.playbackSpeed = pct; MixSync.setRate(pct); }
+    function setSpeed(pct) { S.userSpeed = pct > 0 ? pct : 1; applySpeed(); }
+
+    /* Le MIDI joue au MODIFIED tempo (comme GP) pour que le <audio> reste à
+       ~1,0× (natif — pas de ralenti ni de time-stretch). tempoScale =
+       ModifiedTempo/OriginalTempo (calculé par MixSync.build). La vitesse
+       utilisateur s'applique par-dessus. */
+    function applySpeed() {
+      const ts = MixSync.tempoScale || 1;
+      const sp = S.userSpeed * ts;
+      if (S.api) S.api.playbackSpeed = sp;
+      MixSync.setRate(sp);
+    }
 
     function refreshModeDependentUI() {
       App.syncMetronome(S.metronomeOn, isSynthMode());

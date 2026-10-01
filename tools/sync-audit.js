@@ -37,7 +37,7 @@ const AT_URL  = 'https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.4/dist/alp
 
 /* --- constantes MIROIR de js/mix-sync.js (garder en phase !) -------- */
 const HOLD_MS = 400, SOFT_MS = 25, NUDGE = 0.10, GAIN = 2000;
-const CONTROL_MS = 250, DEADBAND_MS = 50, WRITE_MS = 400, RATE_EPS = 0.01;
+const CONTROL_MS = 250, DEADBAND_MS = 100, WRITE_MS = 1500, RATE_EPS = 0.03;
 const JUMP_SLOPE = 3.0, SLOPE_MIN = 0.5, SLOPE_MAX = 2.0;
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -131,14 +131,24 @@ function analyzeSegments(points) {
     if (!points[i].jump) continue;
     points[i].slope = (i + 1 < n) ? points[i + 1].slope : 1;
   }
-  return { points, nJump, nOff };
+  // pente moyenne → tempoScale = ModifiedTempo/OriginalTempo
+  let sDa = 0, sDt = 0;
+  for (let i = 0; i < n; i++) {
+    const p = points[i], q = points[i + 1];
+    if (!q || p.jump) continue;
+    const dt = q.t - p.t;
+    if (dt > 0) { sDa += (q.a - p.a); sDt += dt; }
+  }
+  const avgSlope = sDt > 0 ? sDa / sDt : 1;
+  const tempoScale = (isFinite(avgSlope) && avgSlope > 0) ? 1 / avgSlope : 1;
+  return { points, nJump, nOff, tempoScale };
 }
 
 function makeBridge(rawPoints, mode) {
-  let points, nJump = 0, nOff = 0;
+  let points, nJump = 0, nOff = 0, tempoScale = 1;
   if (mode === 'new') {
     const r = analyzeSegments(rawPoints.map(p => ({ t: p.t, a: p.a })));
-    points = r.points; nJump = r.nJump; nOff = r.nOff;
+    points = r.points; nJump = r.nJump; nOff = r.nOff; tempoScale = r.tempoScale;
   } else {
     points = rawPoints.map(p => ({ t: p.t, a: p.a })).sort((x, y) => x.t - y.t);
   }
@@ -191,7 +201,7 @@ function makeBridge(rawPoints, mode) {
     return points[lo].slope;
   }
 
-  return { audioMs, targetSec, slopeAt, n: n0, nJump, nOff };
+  return { audioMs, targetSec, slopeAt, n: n0, nJump, nOff, tempoScale };
 }
 
 /* ====================== simulation pas à pas ======================= */
@@ -216,7 +226,7 @@ function simulate(bridge, lastT, dt, jumpAt) {
 
   while (st.masterMs < lastT) {
     st.now += dt;
-    st.masterMs += dt;
+    st.masterMs += dt * bridge.tempoScale;          // MIDI au modified tempo
     st.audioTime += st.audioRate * dt / 1000;
 
     if (st.now - st.lastControl < CONTROL_MS) continue;
@@ -231,7 +241,7 @@ function simulate(bridge, lastT, dt, jumpAt) {
     if (Math.abs(drift) > HOLD_MS) {
       const before = st.audioTime;
       st.audioTime = target;
-      st.audioRate = 1 * bridge.slopeAt(st.masterMs);     // setRate(sp) NEW
+      st.audioRate = bridge.tempoScale * bridge.slopeAt(st.masterMs); // setRate NEW
       st.nSeek++;
       // intentionnel si on traverse une discontinuité ; sinon = glitch (dérive)
       if (jumpAt && jumpAt(st.masterMs)) st.nJumpSeek++; else st.nGlitch++;
@@ -248,7 +258,7 @@ function simulate(bridge, lastT, dt, jumpAt) {
     if (st.now - st.lastWrite < WRITE_MS) continue;
 
     const slope = bridge.slopeAt(st.masterMs);
-    const r = Math.max(0.06, 1 * slope * (1 - clamp(drift / GAIN, -NUDGE, NUDGE)));
+    const r = Math.max(0.06, bridge.tempoScale * slope * (1 - clamp(drift / GAIN, -NUDGE, NUDGE)));
     if (Math.abs(st.audioRate - r) > RATE_EPS) {
       st.audioRate = r; st.lastWrite = st.now; st.nRate++;
     }
@@ -351,7 +361,7 @@ ensureAlphaTab(() => {
   }
 
   /* --- tableau --- */
-  const hdr = ['fichier', 'gen/brut', 'VARIANT', 'recad.', 'arrière', 'glitch', 'sauts', 'burst', 'maxArr'];
+  const hdr = ['fichier', 'gen/brut', 'VARIANT', 'recad.', 'arrière', 'glitch', 'sauts', 'écrit.rate', 'burst', 'maxArr'];
   const lines = [];
   lines.push('| ' + hdr.join(' | ') + ' |');
   lines.push('|' + hdr.map(() => '---').join('|') + '|');
@@ -359,9 +369,9 @@ ensureAlphaTab(() => {
     const lost = (r.rawCount != null && r.gen < r.rawCount) ? ' ⚠' : '';
     const gp = r.gen + '/' + (r.rawCount == null ? '?' : r.rawCount) + lost;
     lines.push('| ' + [r.name, gp, 'LEGACY',
-      r.legacy.seeks, r.legacy.back, r.legacy.glitch, r.legacy.jumpSeek, r.legacy.burst, r.legacy.maxBack].join(' | ') + ' |');
+      r.legacy.seeks, r.legacy.back, r.legacy.glitch, r.legacy.jumpSeek, r.legacy.rate, r.legacy.burst, r.legacy.maxBack].join(' | ') + ' |');
     lines.push('| ' + ['', '', 'NEW',
-      r.neu.seeks, r.neu.back, r.neu.glitch, r.neu.jumpSeek, r.neu.burst, r.neu.maxBack].join(' | ') + ' |');
+      r.neu.seeks, r.neu.back, r.neu.glitch, r.neu.jumpSeek, r.neu.rate, r.neu.burst, r.neu.maxBack].join(' | ') + ' |');
   }
   console.log(lines.join('\n'));
 

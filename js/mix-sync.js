@@ -53,9 +53,9 @@
        d'approvisionnement du synthé (sampleRequest : worklet → main →
        worker), d'où les pistes MIDI également en retard.            */
     const CONTROL_MS = 250;  // la boucle ne s'exécute qu'au plus 4 fois/s
-    const DEADBAND_MS = 50;  // sous cette dérive, on ne touche à rien
-    const WRITE_MS   = 400;  // écart minimal entre deux écritures de vitesse
-    const RATE_EPS   = 0.01; // seuil d'écriture (1 %) : bruit ignoré
+    const DEADBAND_MS = 100; // sous cette dérive, on ne touche à rien
+    const WRITE_MS   = 1500; // écart minimal entre deux écritures de vitesse
+    const RATE_EPS   = 0.03; // seuil d'écriture (3 %) : bruit ignoré
     const STALL_RATIO = 0.5; // maître en avance < 50 % du réel = à l'arrêt
     const STAT_MS    = 5000; // périodicité du rapport d'instrumentation
 
@@ -76,6 +76,8 @@
     let points  = [];      // [{ t, a, jump, slope, rawSlope }] trié par t
     let nJump   = 0;       // nb de segments de saut (discontinuités)
     let nOff    = 0;       // nb de segments à pente hors plage
+    let avgSlope = 1;      // pente moyenne (tempo enreg. / partition)
+    let tempoScale = 1;    // 1/avgSlope = ModifiedTempo/OriginalTempo
     let bias    = 0;       // décalage constant éventuel (calage manuel)
     let playing = false;
     let active  = false;
@@ -169,6 +171,20 @@
         if (!points[i].jump) continue;
         points[i].slope = (i + 1 < n) ? points[i + 1].slope : 1;
       }
+
+      // Pente MOYENNE = tempo relatif enregistrement / partition (hors sauts).
+      // tempoScale = 1/penteMoy = ModifiedTempo/OriginalTempo : c'est le facteur
+      // dont alphaTab accélère le MIDI pour coller à l'enregistrement NATIF.
+      // Avec ça le <audio> reste à ~1,0× (pas de ralenti, pas de time-stretch).
+      let sDa = 0, sDt = 0;
+      for (let i = 0; i < n; i++) {
+        const p = points[i], q = points[i + 1];
+        if (!q || p.jump) continue;
+        const dt = q.t - p.t;
+        if (dt > 0) { sDa += (q.a - p.a); sDt += dt; }
+      }
+      avgSlope = sDt > 0 ? sDa / sDt : 1;
+      tempoScale = (isFinite(avgSlope) && avgSlope > 0) ? 1 / avgSlope : 1;
 
       // alerte : signale les segments que le rate ne PEUT pas suivre, plutôt
       // que de saccader silencieusement (les sauts sont déjà gérés).
@@ -443,7 +459,8 @@
       build, onPosition, onState, resync, setRate, setCountIn,
       start, stop, suspend,
       get active() { return active; },
-      get info()   { return { points: points.length, note: note, bias: bias }; }
+      get info()   { return { points: points.length, note: note, bias: bias }; },
+      get tempoScale() { return tempoScale; }
     };
   })();
 
