@@ -445,7 +445,7 @@
      *  prise à partir d'une classe CSS. */
     function createMix() {
       S.mix = {
-        display:  'all',      // 'all'  | index de la seule piste affichée
+        display:  'all',      // 'all' | Set des index AFFICHÉS (jamais vide)
         solo:     null,       // null   | index de piste | 'audio'  → UN seul
         muted:    new Set(),  // index des pistes en mute
         vol:      new Map(),  // index -> niveau 0..1.5
@@ -899,17 +899,66 @@
     /* -------- Commandes du mélangeur --------
      * Elles modifient le MODÈLE puis rappellent applyMix(). Le DOM ne donne
      * jamais la réplique : il est re peint par refreshMixStates(). */
+
+    /* --- AFFICHAGE : indépendant de l'ÉCOUTE ---
+       Masquer une piste ne la met PAS en mute : alphaTab génère le MIDI de
+       toutes les pistes (`loadMidiForScore`), `renderTracks()` ne fait que
+       choisir celles qu'on DESSINE. D'où le choix de deux modèles séparés.
+
+       `display` vaut 'all' (défaut) ou un Set d'index visibles. Il ne passe
+       JAMAIS à vide : `renderTracks([])` est un no-op chez alphaTab (l.45831
+       teste `tracks.length > 0`), l'écran resterait donc affiché à l'ancien
+       contenu pendant que le modèle dirait « rien ». On garde au minimum une
+       piste visible — c'est aussi la contrainte d'alphaTab. */
+    function isDisplayed(idx) {
+      const d = S.mix ? S.mix.display : 'all';
+      return d === 'all' || (d instanceof Set && d.has(idx));
+    }
+    function displayedTracks() {
+      if (!S.score || !S.mix) return [];
+      if (S.mix.display === 'all') return S.score.tracks.slice();
+      return S.score.tracks.filter(t => S.mix.display.has(t.index));
+    }
+    function applyDisplay() {
+      const tracks = displayedTracks();
+      if (!tracks.length || !S.api) return;      // jamais renderTracks([])
+      S.api.renderTracks(tracks);                // re-dessin, MIDI intact
+      App.refreshMixStates();                    // réallume les yeux allumés
+    }
+
+    /* « Tout afficher » (bouton du tiroir) — ou isolation d'une piste.
+       Invariant du modèle : `display` est TOUJOURS 'all' ou un Set, jamais
+       un nombre brut (sinon isDisplayed() ne saurait plus le lire). */
     function showTrack(index) {
       if (!S.score || !S.mix) return;
       if (index !== 'all' && !S.score.tracks[index]) return;
-      S.mix.display = index;
-      S.api.renderTracks(
-        index === 'all' ? S.score.tracks.slice() : [S.score.tracks[index]]
-      );
-      App.refreshMixStates();
+      S.mix.display = index === 'all' ? 'all' : new Set([index]);
+      applyDisplay();
     }
+
+    /* Oeil d'une ligne : bascule CETTE piste sans toucher aux autres.
+       → 1 piste, plusieurs, ou toutes : le modèle accepte tout. */
     function toggleDisplay(idx) {
-      showTrack(S.mix.display === idx ? 'all' : idx);
+      const m = S.mix;
+      if (!S.score || !m || !S.score.tracks[idx]) return;
+
+      let set;
+      // `'all'` ET toute valeur inattendue = tout affiché (jamais de crash)
+      if (!(m.display instanceof Set)) {
+        set = new Set(S.score.tracks.map(t => t.index));
+        set.delete(idx);
+      } else {
+        set = new Set(m.display);                // copie : on ne mutle pas
+        if (set.has(idx)) set.delete(idx); else set.add(idx);
+      }
+
+      if (set.size === 0) {                      // on n'affiche jamais « rien »
+        App.toast('Une piste au minimum doit rester affichée.', 'info');
+        return;
+      }
+      // forme canonique : tout affiché == 'all' (évite deux états identiques)
+      m.display = set.size === S.score.tracks.length ? 'all' : set;
+      applyDisplay();
     }
     function toggleTrackMute(idx) {
       const m = S.mix;
@@ -1032,7 +1081,7 @@
       setMetronome, setMetronomeVolume,
       setMasterVolume, setAudioVolume,
       // mélangeur : tout part du modèle S.mix
-      showTrack, toggleDisplay, toggleTrackMute, toggleTrackSolo, setTrackVolume,
+      showTrack, toggleDisplay, isDisplayed, toggleTrackMute, toggleTrackSolo, setTrackVolume,
       toggleAudioMute, toggleAudioSolo, resetMix, applyMix,
       toggleLoop, setLoopRange, clearLoopRange,
       setLayout, setScrollMode, setSpeed, applyVolumes, isSynthMode,
@@ -1199,7 +1248,7 @@
         <span class="h-7 w-1.5 shrink-0 rounded-full" style="background:${o.color}"></span>
         <span class="min-w-0 flex-1 truncate text-[12px] leading-tight text-slate-200"
               title="${escapeHtml(o.title)}">${escapeHtml(o.label)}</span>
-        ${o.eye ? `<button class="mx-btn" data-act="eye"  title="Isoler cette piste à l'affichage (recliquer : tout afficher)">${ICON.eye}</button>` : ''}
+        ${o.eye ? `<button class="mx-btn" data-act="eye"  title="Afficher ou masquer cette piste — les autres ne changent pas (1, plusieurs ou toutes au choix)">${ICON.eye}</button>` : ''}
         <button class="mx-btn" data-act="mute" title="Mute : la piste ne sonne pas">${ICON.mute}</button>
         <button class="mx-btn" data-act="solo" title="Solo : seul cela sonne (un seul à la fois)">${ICON.solo}</button>
         <input class="mx-vol" type="range" min="0" max="${o.max || 150}" value="${o.value || 100}" title="Niveau (100 % = niveau d'origine)">`;
@@ -1247,7 +1296,8 @@
         const idx = audio ? null : Number(key);
 
         const eye = row.querySelector('[data-act="eye"]');
-        if (eye) eye.classList.toggle('is-on', m.display === 'all' || m.display === idx);
+        // 'all' → tous allumés ; sinon le Set décide piste par piste.
+        if (eye) eye.classList.toggle('is-on', !audio && Player.isDisplayed(idx));
 
         row.querySelector('[data-act="mute"]').classList.toggle(
           'is-on', audio ? m.audioMute : m.muted.has(idx));
