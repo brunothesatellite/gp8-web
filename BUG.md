@@ -6,7 +6,7 @@ J'ai vérifié la piste audio mp3 incluse dans le .gp, elle n'a pas ce problème
 C'est donc lié au rendu audio pour la piste mp3 de l'application.
 Je ne trouve ce problème que dans cette piste, pour l'instant je ne l'ai pas remarqué ailleurs. Analyse pour voir si c'est lié à ce fichier GP particulier ou si c'est un problème plus fondamental dans la lecture audio : problème de performance sur des gros fichiers, de taux d'échantillonnage du mp3 ou lié à la synchro du mp3 dans le GP d'origine.
 Ne code rien, fait juste une analyse.
-
+Helloween (1988 - Keeper of the Seven Keys - Part II) - Dr. Stein.gp : je lance la lecture mesure 16, j'ai un léger retour en arrière audio en mesure 18 et 19
 
 # MAJOR
 * N/A
