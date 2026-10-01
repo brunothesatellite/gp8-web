@@ -7,6 +7,14 @@
 <title>GP8 Player — Lecteur Guitar Pro d'entraînement</title>
 
 <!-- =========================================================
+     FAVICON (mêmes formes dans les 3 fichiers : médiator de
+     guitare ciel→bleu sur plaque ardoise, voir favicon.svg)
+     ========================================================= -->
+<link rel="icon" href="favicon.ico" sizes="48x48">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<!-- =========================================================
      DEPENDANCES (CDN)
      ========================================================= -->
 <script src="https://cdn.tailwindcss.com"></script>
@@ -220,7 +228,9 @@
           <input id="fileInput" type="file" accept=".gp,.gpx,.gp5,.gpf,.musicxml,.xml,.tex" class="hidden">
         </label>
 
-        <div id="samplesSection" class="mt-6 border-t border-white/10 pt-5 text-left">
+        <!-- Masquée par défaut : elle ne s'affiche QUE si le scan dynamique
+             de samples/ a réussi (voir buildSamples). -->
+        <div id="samplesSection" class="hidden mt-6 border-t border-white/10 pt-5 text-left">
           <div class="flex items-center justify-between">
             <span class="lbl">Fichiers d'exemple</span>
             <span id="sampleHint" class="text-[10px] text-slate-600">audio embarqué inclus</span>
@@ -230,8 +240,15 @@
       </div>
 
       <p class="mt-6 hidden max-w-xl text-[11px] leading-relaxed text-slate-600 sm:block">
-        Astuce : servez le dossier en HTTP (VS&nbsp;Code → <span class="kbd">Live Server</span>) pour charger les
-        fichiers d'exemple. Un fichier déposé/traversé fonctionne aussi en <span class="kbd">file://</span>.
+        Astuce : la liste des fichiers d'exemple n'est jamais écrite dans le code,
+        elle est découverte à chaque chargement. Priorité au manifeste
+        <span class="kbd">samples/list.json</span>, régénéré par
+        <span class="kbd">gen-samples.bat</span> avant déploiement — indispensable
+        si votre serveur refuse de lister un dossier (Synology 403).
+        À défaut, elle provient du listage de <span class="kbd">samples/</span>
+        (Apache <span class="kbd">Options +Indexes</span> · nginx <span class="kbd">autoindex on</span>).
+        Sans ni l'un ni l'autre, la section reste masquée.
+        Un fichier déposé ou traversé fonctionne aussi en <span class="kbd">file://</span>.
       </p>
     </div>
 
@@ -302,6 +319,17 @@
 
   </div>
 
-  <script src="js/app.js"></script>
+  <!-- Ordre OBLIGATOIRE. Ce ne sont PAS des modules ES (l'app doit s'ouvrir
+       depuis file://) mais 7 <script classique> qui partagent les bindings
+       lexicographiques globaux (CFG, AT, $, safe, Player, Samples, App…).
+       Un tag déplacé casse le chargement : `node tools/load-smoke.js`
+       vérifie l'ordre déclaré dans index.html ET l'exécution complète. -->
+  <script src="js/core.js"></script>            <!-- config + helpers ($, safe, clamp) -->
+  <script src="js/audio-sync.js"></script>      <!-- <audio> HTML5 caché -->
+  <script src="js/embedded-audio.js"></script>  <!-- JSZip : audio embarqué du .gp -->
+  <script src="js/mix-sync.js"></script>        <!-- synthé alphaTab (maître) + <audio> (esclave) -->
+  <script src="js/player.js"></script>          <!-- wrapper alphaTab : mélangeur, boucle, affichage -->
+  <script src="js/samples.js"></script>         <!-- découverte des fichiers d'exemple -->
+  <script src="js/app.js"></script>             <!-- interface, tiroir, raccourcis, boot() -->
 </body>
 </html>
