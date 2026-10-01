@@ -1,5 +1,12 @@
 # CRITICAL
-* **TO BE CONFIRMED - RISKY** La lecture de la piste audio, même seule, se désynchronise, avec parfois des micro retours, des sauts, des défaormations : reproductible sur ACDC, vers 45" quand il ya un retour, à identifier finement pour guider l'investigation : à la fin mesure 18, vers le Da Al Coda à ~1', là l'audio saute
+* **CONFIRMED - RISKY** Problème dans la lecture de la piste audio, lorsqu'il y a un retour important.
+ACDC (1979 - Highway to Hell) - Highway to Hell-ref.gp
+à la fin de la mesure 17 vers 1:03, il y DS Al Coda qui renvoi à la mesure 6 (c'est normal, c'est le fonctionnement de la partition), mais cela fait sauter l'audio.
+J'ai vérifié la piste audio mp3 incluse dans le .gp, elle n'a pas ce problème mais la même séquence audio est plutôt vers 1'10" dans le mp3 par contre, à vérifier si cette désynchronisation dans la webapp est normale (je suis bien à 100% de vitesse).
+C'est donc lié au rendu audio pour la piste mp3 de l'application.
+Je ne trouve ce problème que dans cette piste, pour l'instant je ne l'ai pas remarqué ailleurs. Analyse pour voir si c'est lié à ce fichier GP particulier ou si c'est un problème plus fondamental dans la lecture audio : problème de performance sur des gros fichiers, de taux d'échantillonnage du mp3 ou lié à la synchro du mp3 dans le GP d'origine.
+Ne code rien, fait juste une analyse.
+
 
 # MAJOR
 * N/A
