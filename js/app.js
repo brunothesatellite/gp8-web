@@ -250,6 +250,24 @@
     const NUDGE   = 0.10;  // marge max de correction de vitesse (±10 %)
     const GAIN    = 2000;  // ms : vise une remise à zéro en ~2 s
 
+    /* --- cadence de la boucle de correction -------------------------
+       alphaTab remonte `positionChanged` ~344 fois/s : le worklet poste
+       `samplesPlayed` à CHAQUE quantum de 128 frames (44100/128), sans
+       agrégation — worklet → main (alphaTab.js l.41552) → worker
+       (l.33818) → `positionChanged` (l.40171) → main (l.50064) → nous.
+       Exécuter la correction à cette cadence écrivait `playbackRate` sur
+       un <audio> en cours de lecture des dizaines de fois par seconde
+       (reconfiguration de la chaîne média → saccades), et tiendrait le
+       thread principal occupé alors qu'il se trouve SUR le chemin
+       d'approvisionnement du synthé (sampleRequest : worklet → main →
+       worker), d'où les pistes MIDI également en retard.            */
+    const CONTROL_MS = 250;  // la boucle ne s'exécute qu'au plus 4 fois/s
+    const DEADBAND_MS = 50;  // sous cette dérive, on ne touche à rien
+    const WRITE_MS   = 400;  // écart minimal entre deux écritures de vitesse
+    const RATE_EPS   = 0.01; // seuil d'écriture (1 %) : bruit ignoré
+    const STALL_RATIO = 0.5; // maître en avance < 50 % du réel = à l'arrêt
+    const STAT_MS    = 5000; // périodicité du rapport d'instrumentation
+
     let points  = [];      // [{ t: synthTime, a: syncTime }] trié par t
     let bias    = 0;       // décalage constant éventuel (calage manuel)
     let playing = false;
@@ -257,12 +275,25 @@
     let speed   = 1;
     let note    = '';
 
+    /* état de la boucle + instrumentations (rapportées toutes les STAT_MS) */
+    let lastControl = 0, lastWrite = 0, lastMaster = -1;
+    let nCall = 0, msHandler = 0, nRate = 0, nSeek = 0, nStall = 0;
+    let peakDrift = 0, statWin0 = 0;
+
     const el = () => AudioSync.element;
+
+    /* remise à zéro des compteurs (nouveau flux / nouveau score) */
+    function resetStats() {
+      lastControl = 0; lastWrite = 0; lastMaster = -1;
+      nCall = 0; msHandler = 0; nRate = 0; nSeek = 0; nStall = 0;
+      peakDrift = 0; statWin0 = 0;
+    }
 
     /* ---- construction du pont synthé → audio ---- */
     function build(score) {
       points = [];
       note   = '';
+      resetStats();
       if (!score) { note = 'aucun score'; return 0; }
       try {
         const gen = (typeof alphaTab !== 'undefined')
@@ -341,29 +372,93 @@
       seekTo(targetSeconds());
     }
 
-    /* ---- boucle de correction (à chaque playerPositionChanged) ---- */
+    /* ---- boucle de correction ----
+       `playerPositionChanged` arrive ~344 fois/s (cf. CONTROL_MS plus haut) :
+       on compte CHAQUE appel (pour mesurer la tempête) mais on ne décide
+       qu'au plus toutes les CONTROL_MS. */
     function onPosition() {
+      const t0 = performance.now();
+      try { correct(); } finally {
+        nCall++;
+        msHandler += performance.now() - t0;
+      }
+    }
+
+    /* rapport d'instrumentation : une ligne toutes les STAT_MS de lecture */
+    function reportStats(now) {
+      if (!statWin0) { statWin0 = now; return; }
+      if (now - statWin0 < STAT_MS) return;
+      const s = (now - statWin0) / 1000;
+      console.log(
+        `[mix-stats] ${Math.round(nCall / s)} évén/s` +
+        ` · playbackRate ${(nRate / s).toFixed(2)} écriture/s` +
+        ` · seek ${(nSeek / s).toFixed(2)}/s` +
+        ` · arrêts maître ${nStall}` +
+        ` · dérive max ${Math.round(peakDrift)} ms` +
+        ` · handler ${nCall ? (msHandler / nCall).toFixed(2) : '0'} ms` +
+        ` (${Math.round(msHandler / s)} ms/s sur le main thread)`
+      );
+      nCall = 0; msHandler = 0; nRate = 0; nSeek = 0; nStall = 0; peakDrift = 0;
+      statWin0 = now;
+    }
+
+    function correct() {
       if (!active) return;
       const a = el();
       if (!a || !a.src) return;
       const target = targetSeconds();
       if (target == null) return;
 
+      const now = performance.now();
+
       if (!playing) {                                // en pause : simple recadrage
+        if (now - lastControl < CONTROL_MS) return;
+        lastControl = now;
         if (Math.abs(a.currentTime - target) * 1000 > SOFT_MS) seekTo(target);
         return;
       }
       if (a.readyState < 3) return;                  // pas de données : inutile d'ajuster
+      reportStats(now);                              // rapport : uniquement en lecture
+      if (now - lastControl < CONTROL_MS) return;    // ← la cadence imposée ici
+      const dt = now - lastControl;
+      lastControl = now;
 
       const drift = (a.currentTime - target) * 1000; // > 0 : l'audio est en avance
-      const sp    = curSpeed();
-      if (Math.abs(drift) > HOLD_MS) {
+      if (Math.abs(drift) > peakDrift) peakDrift = Math.abs(drift);
+
+      /* Horloge maître à l'arrêt ? `AlphaSynth._onSamplesPlayed` fait
+         `if (sampleCount === 0) return;` (alphaTab l.40094) : quand le synthé
+         manque d'échantillons, SON horloge s'arrête pendant que notre
+         <audio>, lui, continue. Ralentir l'audio à ce moment-là
+         transformerait une panne d'un instant en ralentissement audible suivi
+         d'une resynchronisation sèche (cercle vicieux « ça ralentit et ça
+         saccade »). Tant que le maître est à l'arrêt : aucune correction.
+         Un maître qui recule (stop, aller à une mesure, boucle) n'est PAS un
+         arrêt : on recale alors simplement la référence. */
+      const api = Player.S.api;
+      const master = api ? api.timePosition : 0;
+      const dMaster = master - lastMaster;
+      const stalled = lastMaster >= 0
+        && master >= lastMaster
+        && dMaster < dt * STALL_RATIO;
+      lastMaster = master;
+      if (stalled) { nStall++; return; }
+
+      const sp = curSpeed();
+      if (Math.abs(drift) > HOLD_MS) {                // recadrage franc
         seekTo(target);
         setRate(sp);
+        nSeek++;
         return;
       }
+      if (Math.abs(drift) < DEADBAND_MS) return;      // zone morte : on n'y touche pas
+      if (now - lastWrite < WRITE_MS) return;         // pas d'écriture rapprochée
       const r = Math.max(0.06, sp * (1 - clamp(drift / GAIN, -NUDGE, NUDGE)));
-      if (Math.abs(a.playbackRate - r) > 0.004) a.playbackRate = r;
+      if (Math.abs(a.playbackRate - r) > RATE_EPS) {  // seuil large : le bruit est ignoré
+        a.playbackRate = r;
+        lastWrite = now;
+        nRate++;
+      }
     }
 
     /* ---- état de lecture ---- */
@@ -401,7 +496,7 @@
     }
 
     /* ---- cycle de vie ---- */
-    function start()   { active = true; playing = false; setRate(speed); }
+    function start()   { active = true; playing = false; resetStats(); setRate(speed); }
     function stop()    {
       active = false; playing = false;
       const a = el();
@@ -432,6 +527,7 @@
       metronomeVolume: 0.6,
       metronomeOn: false,
       loopOn: false,
+      loopRange: null,       // plage A→B en cours (modèle local = vérité)
       currentBar: 0,
       externalReady: false,
       externalBlobUrl: null,
@@ -533,8 +629,35 @@
          (l.46264) : on cible l'objet interne `api._player`, le
          `AlphaSynthWrapper` qui porte réellement `_instance`. */
       patchVendorMidiInfo(S.api._player || S.api.player);
+      patchVendorClickKeepsLoop();
       wireEvents();
       return S.api;
+    }
+
+    /* ---- alphaTab : un clic ne doit PAS effacer la boucle ----
+       `_onBeatMouseUp` appelle `applyPlaybackRangeFromHighlight()`
+       (alphaTab.js l.47661) à CHAQUE relâcher ; sans sélection étendue,
+       celle-ci fait `_selectionStart = void 0` + `playbackRange = null`
+       (l.47840-47841) — et le `set playbackRange` worker remet `tickPosition`
+       sur le début de plage (l.39880), ce qui annulerait le positionnement.
+       Décision produit : la boucle se CONSERVE ; un clic ne sert qu'à se
+       positionner. On shunte la méthode sur l'instance : un vrai glisser
+       reste du ressort d'alphaTab, un clic simple se contente de bouger. */
+    function patchVendorClickKeepsLoop() {
+      try {
+        const api = S.api;
+        const orig = api.applyPlaybackRangeFromHighlight;
+        if (typeof orig !== 'function') return;
+        api.applyPlaybackRangeFromHighlight = function () {
+          const sel = this._selectionStart, end = this._selectionEnd;
+          const dragging = !!sel && !!end && sel.beat !== end.beat;
+          if (dragging || !S.loopRange) return orig.call(this);
+          const tc = this.tickCache;
+          if (tc && sel && sel.beat) this.tickPosition = tc.getBeatStart(sel.beat);
+        };
+      } catch (e) {
+        console.warn('[vendor] conservation de la boucle au clic impossible', e);
+      }
     }
 
     /* Chaque enregistrement passe par là : si un fournisseur vendor lève au
@@ -1028,31 +1151,41 @@
       }).catch(() => false);
     }
 
-    /* -------- Boucle -------- */
-    function toggleLoop() {
-      S.loopOn = !S.loopOn;
-      S.api.isLooping = S.loopOn;
-      App.syncLoop(S.loopOn);
+    /* -------- Boucle --------
+       État DOUBLE et INDÉPENDANT :
+         S.loopRange → la plage A→B (modèle local, source de vérité)
+         S.loopOn    → l'icône « boucle A→B (L) » = alphaTab.isLooping
+       Décocher L conserve la plage ET son surlignage : la lecture se fait
+       alors une seule fois dedans.                                    */
+    function setLoopOn(on) {
+      S.loopOn = !!on;
+      if (S.api) S.api.isLooping = !!on;
+      App.syncLoop(!!on);
     }
 
+    function toggleLoop() { setLoopOn(!S.loopOn); }
+
     function setLoopRange(startIdx, endIdx) {
-      if (!S.score || startIdx < 0 || endIdx < 0) return;
+      if (!S.score || !S.api || startIdx < 0 || endIdx < 0) return;
       const bars = S.score.masterBars;
       const a = Math.min(startIdx, endIdx), b = Math.max(startIdx, endIdx);
       const range = new (AT.PlaybackRange || Object)();
       range.startTick = bars[a].start;
       range.endTick   = (b + 1 < bars.length) ? bars[b + 1].start : S.api.endTick;
-      S.api.playbackRange = range;
-      S.api.isLooping = true;
-      S.loopOn = true;
-      App.syncLoop(true);
+      S.api.playbackRange = range;   // → playbackRangeChanged (asynchrone)
+      setLoopOn(true);               // B2 : l'icône L s'allume tout de suite
       App.toast(`Boucle mesures ${a + 1} → ${b + 1}`, 'info');
     }
 
     function clearLoopRange() {
       if (!S.api) return;
-      S.api.playbackRange = null;
+      S.loopRange = null;            // AVANT, sinon l'événement `null` ci-dessous
+      S.api.playbackRange = null;    // serait interprété comme un clic à la souris
       S.api.clearPlaybackRangeHighlight();
+      /* alphaTab ne vide PAS _selectionStart/_selectionEnd ici (l.47877) :
+         sans ça, le surlignage réapparaîtrait au prochain re-render. */
+      try { S.api._selectionStart = void 0; S.api._selectionEnd = void 0; } catch (e) {}
+      setLoopOn(false);
       App.onPlaybackRange(null);
     }
 
@@ -1083,7 +1216,7 @@
       // mélangeur : tout part du modèle S.mix
       showTrack, toggleDisplay, isDisplayed, toggleTrackMute, toggleTrackSolo, setTrackVolume,
       toggleAudioMute, toggleAudioSolo, resetMix, applyMix,
-      toggleLoop, setLoopRange, clearLoopRange,
+      toggleLoop, setLoopOn, setLoopRange, clearLoopRange,
       setLayout, setScrollMode, setSpeed, applyVolumes, isSynthMode,
       flushPerf
     };
@@ -1093,6 +1226,7 @@
   const App = (() => {
     let dragging = false;
     let scrubbing = false;
+    const UI_MS = 50;   // barre de progression : 20 Hz suffisent (344 Hz avant)
     const mqDesktop = window.matchMedia('(min-width: 768px)');
 
     /* ---------- toasts ---------- */
@@ -1160,19 +1294,78 @@
       $('#emptyState').classList.remove('hidden');
     }
 
-    /* ---------- samples ---------- */
-    function buildSamples() {
+    /* ---------- samples ----------
+       Le navigateur ne peut PAS lister un dossier depuis file:// (fetch sur
+       une URL `file:` y est bloqué). Deux régimes décidés au démarrage :
+         file://  → la section « Fichiers d'exemple » disparaît complètement
+                    (un fichier déposé/traversé reste, lui, disponible).
+         http://  → on scanne `samples/` (page d'index renvoyée par le
+                    serveur) : la liste reflète ce qui est RÉELLEMENT sur le
+                    disque, sans jamais retoucher au code.               */
+    const SAMPLE_RE = /\.(gp|gpx|gp5)$/i;
+
+    function sampleLabel(file) {
+      const base = file.replace(SAMPLE_RE, '');
+      // « Artiste (1993 - Album) - Titre.gp » → « Artiste — Titre »
+      const m = base.match(/^(.+?)\s*\([^)]*\)\s*-\s*(.+)$/);
+      return m ? `${m[1]} — ${m[2]}` : base;
+    }
+
+    async function scanSamples() {
+      const res = await fetch('samples/', { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+      const out = [];
+      doc.querySelectorAll('a[href]').forEach(a => {
+        const href = a.getAttribute('href') || '';
+        let name = (a.textContent || '').trim();
+        if (!SAMPLE_RE.test(name)) {                    // lien sans texte exploitable
+          try { name = decodeURIComponent(href); } catch (e) { name = href; }
+        }
+        if (!SAMPLE_RE.test(name)) return;              // sous-dossier, ../, divers
+        if (/[/?#]/.test(name) || name.startsWith('.')) return;
+        out.push({ label: sampleLabel(name), file: name });
+      });
+      if (!out.length) throw new Error('aucun fichier .gp détecté');
+      out.sort((x, y) => x.label.localeCompare(y.label, 'fr'));
+      return out;
+    }
+
+    function renderSamples(list) {
       const box = $('#sampleList');
+      const hint = $('#sampleHint');
       box.innerHTML = '';
-      CFG.samples.forEach(s => {
+      if (hint) {
+        hint.textContent = `${list.length} fichier${list.length > 1 ? 's' : ''} · audio embarqué inclus`;
+      }
+      list.forEach(s => {
         const b = document.createElement('button');
         b.className = 'group flex w-full items-center gap-3 rounded-lg border border-white/5 bg-slate-800/50 px-3 py-2 text-left transition hover:border-sky-500/50 hover:bg-slate-800';
-        b.innerHTML = `<span class="text-sky-400 opacity-70 group-hover:opacity-100">▶</span>
-                       <span class="truncate text-[13px] text-slate-300">${s.label}</span>
-                       <span class="ml-auto shrink-0 text-[10px] uppercase tracking-wider text-slate-600">gp</span>`;
+        const ico = document.createElement('span');
+        ico.className = 'text-sky-400 opacity-70 group-hover:opacity-100';
+        ico.textContent = '▶';
+        const name = document.createElement('span');    // texte = nom de fichier :
+        name.className = 'truncate text-[13px] text-slate-300';   // jamais d'innerHTML
+        name.textContent = s.label;
+        const tag = document.createElement('span');
+        tag.className = 'ml-auto shrink-0 text-[10px] uppercase tracking-wider text-slate-600';
+        tag.textContent = 'gp';
+        b.append(ico, name, tag);
         b.onclick = () => loadSample(s);
         box.appendChild(b);
       });
+    }
+
+    async function buildSamples() {
+      const section = $('#samplesSection');
+      if (location.protocol === 'file:') {
+        if (section) section.classList.add('hidden');
+        return;
+      }
+      let list = CFG.samples;
+      try { list = CFG.samples = await scanSamples(); }
+      catch (e) { console.warn('[samples] scan impossible → liste en dur conservée', e); }
+      renderSamples(list);
     }
 
     async function loadSample(s) {
@@ -1201,11 +1394,15 @@
       // le mélangeur ne se remplit qu'une fois le score connu
       $('#btnMixer').disabled = false;
 
-      // boucle A/B
+      // boucle A/B — un nouveau score ne peut pas hériter de l'ancien A→B
+      if (Player.S.api && Player.S.api.playbackRange) Player.S.api.playbackRange = null;
+      Player.S.loopRange = null;
+      Player.setLoopOn(false);
       fillBarSelect($('#loopStart'), score.masterBars.length);
       fillBarSelect($('#loopEnd'),   score.masterBars.length);
       $('#loopStart').disabled = $('#loopEnd').disabled = false;
-      $('#btnApplyLoop').disabled = $('#btnClearLoop').disabled = false;
+      $('#btnApplyLoop').disabled = false;
+      $('#btnClearLoop').disabled = true;        // aucune plage au chargement
       $('#loopStart').value = '0';
       $('#loopEnd').value   = String(Math.max(0, Math.min(7, score.masterBars.length - 1)));
 
@@ -1322,9 +1519,21 @@
       try { return `rgba(${c.r | 0},${c.g | 0},${c.b | 0},.85)`; } catch (e) { return '#38bdf8'; }
     }
 
-    /* ---------- position ---------- */
+    /* ---------- position ----------
+     *  `playerPositionChanged` tombe ~344 fois/s (quantum AudioWorklet de
+     *  128 frames posté à chaque exécution de `process()`). On plafonne
+     *  l'interface à 20 Hz et on n'écrit QUE si la valeur a changé :
+     *  avant correction, `--pct` et `textContent` étaient réécrits 344 fois/s
+     *  (99,7 % pour une chaîne identique), ce qui invalidait les styles en
+     *  permanence sur le thread principal — celui-là même qui relaie les
+     *  demandes d'échantillons du synthé.                                */
+    let lastUiTick = 0;
     function updatePosition(e) {
       if (scrubbing) return;
+      const now = performance.now();
+      if (now - lastUiTick < UI_MS) return;
+      lastUiTick = now;
+
       const range = Player.S.api.playbackRange;
       const from  = range ? range.startTick : 0;
       const to    = range ? range.endTick   : e.endTick;
@@ -1332,10 +1541,12 @@
       const ratio = to > from ? (tick - from) / (to - from) : 0;
 
       const p = $('#progress');
-      p.value = String(Math.round(ratio * 1000));
-      paintRange(p);
+      const val = String(Math.round(ratio * 1000));
+      if (p.value !== val) { p.value = val; paintRange(p); }
 
-      $('#timeLabel').textContent = `${fmtTime(e.currentTime)} / ${fmtTime(e.endTime)}`;
+      const label = `${fmtTime(e.currentTime)} / ${fmtTime(e.endTime)}`;
+      const t = $('#timeLabel');
+      if (t.textContent !== label) t.textContent = label;
     }
 
     /* ---------- badges ---------- */
@@ -1351,16 +1562,90 @@
     function syncLoop(on) {
       $('#btnLoop').classList.toggle('is-on', !!on);
     }
-    function onPlaybackRange(range) {
-      const has = !!range;
-      $('#btnClearLoop').disabled = !has;
-      if (has) {
-        $('#loopStart').value = String(barIndexAt(range.startTick));
-        $('#loopEnd').value   = String(Math.max(0, barIndexAt(range.endTick) - 1));
-      }
+
+    /* ---- Boucle A→B : tout ce qui vient d'alphaTab ------------------
+       B3 : l'argument est un `PlaybackRangeChangedEventArgs` dont la SEULE
+       propriété est `.playbackRange` (alphaTab.js l.33370). L'ancien code
+       lisait `range.startTick` → `undefined` → `barIndexAt(undefined)` = 0
+       → les DEUX listes retombaient sur « Mesure 1 » (le fameux 1 et 1). */
+    function rangeArg(e) {
+      if (!e) return null;
+      if ('playbackRange' in e) return e.playbackRange || null;
+      if ('startTick' in e && 'endTick' in e) return e;
+      return null;
     }
+    function sameRange(x, y) {
+      return !!x && !!y && x.startTick === y.startTick && x.endTick === y.endTick;
+    }
+
+    function onPlaybackRange(e) {
+      const r = rangeArg(e);
+      const st = Player.S;
+
+      /* Filet de sécurité : la branche normale du clic est neutralisée par
+         patchVendorClickKeepsLoop(). Si alphaTab perdait quand même la plage,
+         on la remet en place SANS toucher à l'icône (l'état L doit survivre). */
+      if (!r && st.loopRange) {
+        if (st.api && !st.api.playbackRange) st.api.playbackRange = st.loopRange;
+        return;
+      }
+
+      if (!r) {                                   // effacement volontaire
+        $('#btnClearLoop').disabled = true;
+        Player.setLoopOn(false);
+        return;
+      }
+
+      $('#btnClearLoop').disabled = false;
+      fillLoopSelects(r);                         // B3 : la liste suit la plage
+
+      if (sameRange(r, st.loopRange)) return;     // simple ré-émision : on n'arme rien
+      st.loopRange = r;
+      Player.setLoopOn(true);                     // B2 : nouvelle plage = icône L
+      highlightRange(r);                          // B1 : surlignage sur le score
+    }
+
+    /* B3 : la fin se lit sur le DERNIER tick de la plage (endTick - 1).
+       L'ancien `barIndexAt(endTick) - 1` se trompait sur la dernière mesure,
+       où endTick vaut `api.endTick`. On borne aux bornes réelles de la liste. */
+    function fillLoopSelects(r) {
+      const bars = Player.S.score ? Player.S.score.masterBars : [];
+      if (!bars.length) return;
+      const last = bars.length - 1;
+      const a = clamp(barIndexAt(r.startTick), 0, last);
+      const b = clamp(barIndexAt(Math.max(r.startTick, (r.endTick || 0) - 1)), a, last);
+      const s = $('#loopStart'), t = $('#loopEnd');
+      if (s.value !== String(a)) s.value = String(a);
+      if (t.value !== String(b)) t.value = String(b);
+    }
+
+    /* B1 : `highlightPlaybackRange` pose _selectionStart/_selectionEnd, que
+       alphaTab RÉAPPLIQUE après CHAQUE re-render (l.48224). Sans cet appel,
+       le surlignage du chemin « listes A/B » disparaissait au premier reflow
+       (ouverture du tiroir, changement de layout…) — le chemin souris, lui,
+       renseignait ces champs tout seul.                                  */
+    function highlightRange(r) {
+      const st = Player.S;
+      try {
+        const tc = st.api && st.api.tickCache;
+        const bl = st.api && st.api.boundsLookup;
+        if (!tc || !bl || !st.score) return;
+        const ids = new Set(st.score.tracks
+          .filter(t => Player.isDisplayed(t.index))
+          .map(t => t.index));
+        if (!ids.size) return;
+        const s = tc.findBeat(ids, r.startTick);
+        const t = tc.findBeat(ids, Math.max(r.startTick, (r.endTick || 0) - 1));
+        if (!s || !t || !s.beat || !t.beat || s.beat === t.beat) return;
+        // garde anti-crash : _cursorSelectRange lève si les bornes manquent
+        if (!bl.findBeat(s.beat) || !bl.findBeat(t.beat)) return;
+        st.api.highlightPlaybackRange(s.beat, t.beat);
+      } catch (e) { /* surlignage best-effort : jamais bloquant */ }
+    }
+
     function barIndexAt(tick) {
       const bars = Player.S.score ? Player.S.score.masterBars : [];
+      if (!(tick >= 0)) return 0;
       for (let i = bars.length - 1; i >= 0; i--) if (bars[i].start <= tick) return i;
       return 0;
     }
@@ -1558,7 +1843,7 @@
         document.body.innerHTML = '<div style="padding:40px;font-family:sans-serif">Impossible de charger alphaTab (CDN injoignable).</div>';
         return;
       }
-      buildSamples();
+      buildSamples().catch(e => console.warn('[samples]', e));
       wireUI();
       wireDnD();
       wireShortcuts();

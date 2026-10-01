@@ -39,7 +39,15 @@
      ========================================================= */
   .at-cursor-bar   { background: rgba(56,189,248,.16) !important; border-radius: 2px; }
   .at-cursor-beat  { background: #0ea5e9 !important; box-shadow: 0 0 8px rgba(14,165,233,.7); }
-  .at-selection    { background: rgba(250,204,21,.30) !important; border-radius: 2px; }
+
+  /* ⚠ `.at-selection` est le CONTENEUR (createCursors, alphaTab.js l.41324) :
+     il reste à 0×0 puisque ses enfants sont en position:absolute. Les blocs
+     ambrés de la boucle sont ses `> div` (createSelectionElement l.41393) —
+     alphaTab n'y pose AUCUN fond (HtmlElementContainer l.30273 ne règle que
+     width/height/transform). C'est donc les enfants qu'il faut peindre :
+     peindre le conteneur ne rendait RIEN (surlignage invisible).        */
+  .at-selection > div { background: rgba(250,204,21,.30) !important; border-radius: 2px; }
+
   .at-highlight    { /* éléments de la mesure jouée en surbrillance */ }
 
   /* =========================================================
