@@ -552,3 +552,63 @@ reconstruire les occurrences depuis l'ordre des `FrameOffset` — à faire si be
   `--gp <fichier>` : un seul .gp ; `--dt <ms>` : pas de simulation).
 * `node tools/load-smoke.js` : chargement + bindings.
 * alphaTab 1.8.4 est téléchargé une fois dans `tools/vendor/` (ignoré par git).
+
+---
+
+## 12. Reste à faire — 2 bugs identifiés (dans l'ordre d'attaque)
+
+### 12.1 Bug des alternate endings (volta) — **cause racine de P3**
+
+**Symptôme** (Blink 182 – All the Small Things) : les renvois multiples (fins
+1‑2‑3 puis 4) sont mal développés. Attendu `6-7-8-9 6-7-8-9 6-7-8-9 6-7-8-10`,
+observé `6-7-8-9` ×2 puis `10` — les fins ne sont pas épuisées.
+
+**Structure GPIF** (correcte, bien lue par alphaTab) :
+```
+#5 (mes 6)  <Repeat start="true"  count="0">
+#8 (mes 9)  <Repeat end="true" count="2"> <AlternateEndings>1 2 3</AlternateEndings>
+#9 (mes 10) <AlternateEndings>4</AlternateEndings>
+```
+→ 4 passages attendus (fin 9 pour les passes 1‑2‑3, fin 10 pour la passe 4).
+
+**Mécanisme** — `MidiPlaybackController._moveNextWithNormalRepeats`
+(alphaTab.js l.42119) pilote le nombre de passages par `repeatCount` :
+```js
+const masterBarRepeatCount = masterBar.repeatCount - 1;   // = 2 - 1 = 1
+if (repeat.iterations[…] < masterBarRepeatCount) { … répète … }
+```
+`repeatCount=2` → 2 passages, alors que les **alternate endings** (1‑2‑3‑4) en
+exigent **4**. La boucle s'arrête avant d'épuiser les fins alternées.
+
+**Portée** : **global** — tout morceau avec alternate endings (volta). Blink 182
+n'est que le cas le plus visible (4 fins d'affilée).
+
+**Lien avec P3** : c'est la **cause racine**. Le nombre de passages faux fait
+diverger le compteur `(BarIndex, BarOccurrence)` d'alphaTab vs GP → les points de
+synchro sont mal appariés → symptôme P3. Corriger le développement des fins
+alternées doit **aussi** faire retomber une bonne partie de P3.
+
+**Correctif à envisager** : dans `_moveNextWithNormalRepeats`, quand le groupe a
+des alternate endings, le nombre de passages doit être dicté par le **numéro de
+fin maximum** (ici 4), pas par `repeatCount` (2). Attention à ne pas casser les
+répétitions simples (sans volta) où `repeatCount` = nombre de passages.
+
+### 12.2 P3 / §9.6 — reconstruction des occurrences (résidu)
+
+Une fois 12.1 corrigé, traiter le **résidu** : les fichiers où alphaTab et GP
+divergent encore sur les occurrences de mesures (malgré un développement correct).
+Concerne surtout **ACDC** (64/80 points), **Renaud** (113/156), **Iron Maiden**
+(135/136).
+
+**Correctif (§9.6)** : reconstruire le mapping `(mesure, occurrence) → FrameOffset`
+**depuis l'ordre chronologique des `FrameOffset`** (lui strictement cohérent) au lieu
+de se fier à l'appariement `(BarIndex, BarOccurrence)` d'alphaTab. → le saut (déjà
+propre grâce à la Phase 1) atterrit alors sur la **bonne** occurrence.
+
+**Limite** : §9.6 corrige la couche « appariement ». Si alphaTab développe encore
+les répétitions un nombre de fois différent de l'enregistrement (couche 2), un saut
+résiduel peut subsister → à remonter en amont (alphaTab) si besoin.
+
+### Ordre d'attaque
+1. **12.1** (alternate endings) — cause racine, corrige le MIDI *et* une partie de P3.
+2. **12.2** (§9.6) — pour le résidu que 12.1 ne couvre pas.
