@@ -194,7 +194,7 @@
     }
 
     function correct() {
-      if (!active) return;
+      if (!active || counting) return;
       const a = el();
       if (!a || !a.src) return;
       const target = targetSeconds();
@@ -262,7 +262,7 @@
       if (!active) { try { a.pause(); } catch (e) {} a.playbackRate = 1; return; }
 
       setRate(curSpeed());
-      if (playing) {
+      if (playing && !counting) {
         resync();                                     // on cale AVANT de démarrer
         const p = a.play();
         if (p && typeof p.catch === 'function') {
@@ -299,8 +299,28 @@
       if (a) { try { a.pause(); } catch (e) {} }
     }
 
+    /* ---- gel pendant le compte à rebours ----
+       `AlphaSynth.play()` fait `updateTimePosition(0, true)` au démarrage
+       du count-in (alphaTab l.39963) : le maître rapporte donc une
+       position ≈ 0 pendant les 4 temps. Sans ce gel, `onState(Playing)`
+       démarre la piste audio immédiatement (elle joue derrière le
+       décompte) et `correct()` finirait par la recaler… sur le début du
+       fichier. On fige tout, puis on reprend avec un resync à la fin. */
+    let counting = false;
+    function setCountIn(on) {
+      if (counting === !!on) return;
+      counting = !!on;
+      const a = el();
+      if (counting) { if (a) { try { a.pause(); } catch (e) {} } return; }
+      if (active && playing && a) {                      // fin du décompte
+        resync();
+        const p = a.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      }
+    }
+
     return {
-      build, onPosition, onState, resync, setRate,
+      build, onPosition, onState, resync, setRate, setCountIn,
       start, stop, suspend,
       get active() { return active; },
       get info()   { return { points: points.length, note: note, bias: bias }; }

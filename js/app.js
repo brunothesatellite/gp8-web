@@ -275,8 +275,9 @@
     let countInTimers = [];
     function showCountIn(beats, beatMs) {
       hideCountIn();
+      MixSync.setCountIn(true);     // la piste audio ne doit PAS sonner pendant le décompte
       const box = $('#countIn'), num = $('#countInNum');
-      if (!box || !num) return;
+      if (!box || !num) { MixSync.setCountIn(false); return; }
       beatMs = beatMs > 0 ? beatMs : 500;
       beats  = beats > 1 ? Math.round(beats) : 4;
       box.classList.remove('hidden');
@@ -296,6 +297,7 @@
       countInTimers = [];
       const box = $('#countIn');
       if (box) { box.classList.add('hidden'); box.classList.remove('flex'); }
+      MixSync.setCountIn(false);    // la piste audio reprend (resync + play)
     }
 
     function syncCountIn(on, synthActive) {
