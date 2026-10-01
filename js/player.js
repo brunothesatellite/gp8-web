@@ -18,6 +18,7 @@
       audioVolume: 1.0,    // fader « Audio Track »
       metronomeVolume: 0.6,
       metronomeOn: false,
+      countInOn: false,
       loopOn: false,
       loopRange: null,       // plage A→B en cours (modèle local = vérité)
       currentBar: 0,
@@ -429,6 +430,26 @@
     function setMetronomeVolume(v) {
       S.metronomeVolume = clamp(v, 0, 1);
       if (S.metronomeOn) S.api.metronomeVolume = S.metronomeVolume;
+      applyCountInVolume();          // le clic du décompte suit le même fader
+    }
+
+    /* -------- Délai de 4 temps (count-in) --------
+     *  alphaTab ne déclenche le count-in QUE dans `AlphaSynth.play()`
+     *  (l.39959, via `sequencer.startCountIn()`) : un passage de boucle
+     *  passe par `checkForFinish` (branche `isLooping`, l.40121) et n'y
+     *  touche JAMAIS — le délai est donc bien appliqué au lancement
+     *  uniquement, jamais à chaque boucle. On ne fait que brancher le
+     *  réglage `countInVolume`, qui est INDEPENDANT de `metronomeVolume`
+     *  (l.39829) : le décompte sonne même le métronome éteint, et se tait
+     *  dès qu'on force 0. */
+    function setCountIn(on) {
+      S.countInOn = !!on;
+      applyCountInVolume();
+      App.syncCountIn(S.countInOn, isSynthMode());
+    }
+    function applyCountInVolume() {
+      if (!S.api) return;
+      S.api.countInVolume = S.countInOn ? S.metronomeVolume : 0;
     }
 
     /* -------- Volumes --------
@@ -774,13 +795,14 @@
 
     function refreshModeDependentUI() {
       App.syncMetronome(S.metronomeOn, isSynthMode());
+      App.syncCountIn(S.countInOn, isSynthMode());
       applyVolumes();
     }
 
     return {
       S, init, loadFile,
       play, pause, toggle, stop, seekRatio, gotoBar,
-      setMetronome, setMetronomeVolume,
+      setMetronome, setMetronomeVolume, setCountIn,
       setMasterVolume, setAudioVolume,
       // mélangeur : tout part du modèle S.mix
       showTrack, toggleDisplay, isDisplayed, toggleTrackMute, toggleTrackSolo, setTrackVolume,

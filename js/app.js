@@ -120,7 +120,7 @@
       buildTrackList(score);
 
       // boutons
-      ['#btnPlay', '#btnStop', '#btnPrev', '#btnNext', '#btnMetronome', '#btnLoop']
+      ['#btnPlay', '#btnStop', '#btnPrev', '#btnNext', '#btnMetronome', '#btnCountIn', '#btnLoop']
         .forEach(id => $(id).disabled = false);
 
       Player.S.currentBar = 0;
@@ -268,6 +268,12 @@
       b.classList.toggle('is-on', !!on);
       b.disabled = !synthActive;
       b.title = synthActive ? 'Métronome (M)' : 'Métronome indisponible en mode piste audio';
+    }
+    function syncCountIn(on, synthActive) {
+      const b = $('#btnCountIn');
+      b.classList.toggle('is-on', !!on);
+      b.disabled = !synthActive;
+      b.title = synthActive ? 'Délai de 4 temps avant lecture' : 'Décompte indisponible en mode piste audio';
     }
     function syncLoop(on) {
       $('#btnLoop').classList.toggle('is-on', !!on);
@@ -501,6 +507,7 @@
       $('#btnPrev').onclick       = () => Player.gotoBar(-1);
       $('#btnNext').onclick       = () => Player.gotoBar(1);
       $('#btnMetronome').onclick  = () => Player.setMetronome(!Player.S.metronomeOn);
+      $('#btnCountIn').onclick    = () => Player.setCountIn(!Player.S.countInOn);
       $('#btnLoop').onclick       = () => Player.toggleLoop();
 
       // panneau avancé (mobile)
@@ -586,7 +593,7 @@
     return {
       boot, toast, loader, armLoaderWatchdog, hideEmptyState, showEmptyState,
       onScoreLoaded, updatePosition,
-      syncPlayBadge, syncMetronome, syncLoop, onPlaybackRange,
+      syncPlayBadge, syncMetronome, syncCountIn, syncLoop, onPlaybackRange,
       refreshMixStates, openDrawer, closeDrawer
     };
   })();
