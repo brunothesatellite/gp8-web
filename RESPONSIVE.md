@@ -1,10 +1,20 @@
-# RESPONSIVE.md — Mode mobile / paysage (< 600 px et au-delà)
+# RESPONSIVE.md — Mode mobile / paysage
 
-> **Statut** : analyse terminée, **aucune correction codée**.
-> Date : 2026-10-01 · Portée : `index.html`, `css/styles.css`, `js/app.js`
-> Entrée associée dans `BUG.md` : *« Le mode mobile (<600px) n'est pas fonctionnel »*.
+> **Définition du seuil (précision du rapporteur)** : « < 600 px » = **largeur du
+> viewport strictement inférieure à 600 px**. Ce n'est pas un point de rupture codé —
+> voir §1.2 et §6.
 >
-> **Décision à prendre avant toute ligne de code** : voir §6 — **640 px ou 768 px ?**
+> **Cible de référence (demande explicite)** : **Google Pixel 7a**
+> (1080 × 2400 @ DPR 2,625) → viewport CSS **412 × 915 en portrait**,
+> **915 × 412 en paysage**.
+> Le portrait tombe bien sous 600 px ; le paysage **dépasse** 600 px tout en n'ayant que
+> **412 px de haut** → un test de **largeur seul ne peut pas le traiter**. C'est la
+> démonstration qu'il faut une condition de hauteur (§6).
+>
+> **Statut** : analyse terminée, **correction codée (P1, P2, P3, P4 + P6 partiel)**,
+> en attente de validation sur device. · Date : 2026-10-01
+> · Portée : `index.html`, `css/styles.css`, `js/app.js`
+> Entrée associée dans `BUG.md` : *« Le mode mobile (<600px) n'est pas fonctionnel »*.
 
 ---
 
@@ -47,17 +57,24 @@ Deux symptômes distincts :
 
 ### 1.2 Points de rupture réellement présents dans le code
 
-| Seuil | Où | Effet |
-|---|---|---|
-| **480** | `styles.css:155` | `.mx-vol` 74 → 96 px |
-| **640** | Tailwind `sm` sur `#advanced` | `grid-cols-1` → `grid-cols-2` |
-| **768** | `styles.css:82-85`, `styles.css:130` · `index.html` (`md:`) · `app.js:1230` `mqDesktop` | panneau réglages forcé ouvert + `#btnMore` supprimé ; tiroir 340 px ; transport en haut ; layout `horizontal` |
-| **1024** | Tailwind `lg` sur `#advanced` | `grid-cols-2` → `grid-cols-3` |
-
 > ⚠️ **Il n'existe AUCUN point de rupture à 600 px**, aucune règle `orientation`,
 > aucun `max-height` sur `#advanced`, aucun `min-height` sur `#stage`.
 > Vérifié par grep sur les 3 fichiers.
-> Le « <600 px » du rapport est donc **empirique** → il faut trancher entre 640 et 768 (§6).
+> Le « <600 px » du rapport est donc **empirique** — le rapporteur précise
+> qu'il désigne la **largeur du viewport** ; en l'état, aucun seuil ne porte ce nom.
+>
+> **Ajout après analyse** — la rangée de boutons a **changé de taille** :
+> le bouton **Décompte (4 temps)** ajouté en `c17adbb` est le 8ᵉ enfant de la rangée
+> (`index.html:87`). Le calcul de P3 doit être refait avec lui (voir §2 P3).
+
+| Seuil | Où | Effet |
+|---|---|---|
+| **480** | `styles.css` — `.btn-ctl:not(.btn-primary)` | `min-width` 38 → **36 px**, `padding` 9 → 7 px (nouveau, P3) |
+| **480** | `styles.css:185` | `.mx-vol` 74 → 96 px |
+| **560** | `styles.css` `@media (min-width:768px) and (**min-height:560px**)` | force-ouverture de `#advanced` + suppression de `#btnMore` (nouveau, P1) |
+| **640** | Tailwind `sm` sur `#advanced` | `grid-cols-1` → `grid-cols-2` |
+| **768** | Tailwind `md:` · `styles.css` (tiroir 340 px) · `app.js` `mqDesktop` | transport en haut ; tiroir en colonne ; layout `horizontal` |
+| **1024** | Tailwind `lg` sur `#advanced` | `grid-cols-2` → `grid-cols-3` |
 
 ---
 
@@ -120,24 +137,38 @@ C'est l'explication la plus probable de « *paramétrage impossible en vertical 
 
 ### P3 — 🔴 La rangée de boutons **déborde** en portrait étroit
 
-Largeurs issues de `.btn-ctl { min-width:38px; padding:0 9px }` (`styles.css:91-96`) et
-`.btn-primary { min-width:52px }` (`styles.css:102`) — **`min-width` interdit au flex
-de réduire davantage**, donc la rangée ne peut que déborder :
+Largeurs issues de `.btn-ctl { min-width:38px; padding:0 9px }` et
+`.btn-primary { min-width:52px }` — **`min-width` interdit au flex de réduire
+davantage**, donc la rangée ne peut que déborder.
+
+**Recalculé après l'ajout du bouton Décompte (`c17adbb`, 8ᵉ enfant de la rangée)** :
 
 ```
-#btnPlay 52 + #btnStop #btnPrev #btnNext #btnMetronome #btnLoop   5×38 = 190
-+ 6 gaps de 6 px (gap-1.5)                                            =  36
+#btnPlay 52
++ #btnStop #btnPrev #btnNext #btnMetronome #btnCountIn #btnLoop    6×38 = 228
++ 7 gaps de 6 px (gap-1.5)                                            =  42
 + groupe ml-auto { #btnMixer 38 + gap 6 + #btnMore 38 }               =  82
-= 360 px   +   px-3 (12+12)                                           = 384 px
+= 404 px   +   px-3 (12+12)                                           = 428 px
 ```
 
 | Viewport | Espace dispo (viewport − 24) | Débordement | `#btnMore` visible |
 |---|---|---|---|
-| 412 px | 388 | 0 | ✔ |
-| 393 px | 369 | 0 | ✔ (9 px de marge) |
-| **375 px** | 351 | **9 px** | 29/38 px |
-| **360 px** | 336 | **24 px** | **9/38 px ← non cliquable** |
-| **320 px** | 296 | **64 px** | **0 ← entièrement coupé** |
+| **412 px (Pixel 7a portrait)** | 388 | **40 px** ✗ | **coupé ← SYMPTÔME REPRODUIT** |
+| **393 px** | 369 | 59 px | coupé |
+| **375 px** | 351 | 77 px | coupé |
+| **360 px** | 336 | 92 px | coupé |
+| **320 px** | 296 | 132 px | coupé |
+
+> ⚠️ **L'ancien tableau disait « 412 px → 0 de débordement »** : il ne comptait que
+> **5** boutons secondaires. Le bouton Décompte ajoute **44 px** (38 + gap 6) →
+> le seuil du symptôme passe de **~380 px à ~420 px**, c'est-à-dire **il touche le
+> Pixel 7a en portrait**. Cause ajoutée à la liste des régressions introduites après
+> la rédaction de ce document.
+>
+> **Corrigé** : `flex-wrap` sur la rangée (`index.html:87`), `gap-1 md:gap-1.5`, et
+> `.btn-ctl:not(.btn-primary){ min-width:36px; padding:0 7px }` sous 480 px
+> (`styles.css`) → **396 px utiles sur 412** (16 px de marge), et sous ~396 px le
+> groupe `ml-auto` bascule sur une 2ᵉ ligne **au lieu d'être rogné**.
 
 `body overflow-hidden` (`index.html:35`) → **pas de scroll, juste un rognage**.
 `#btnMore` (Réglages) et une partie de `#btnMixer` (Mélangeur) sont donc **coupés au bord
@@ -198,54 +229,77 @@ DevTools → Device toolbar. Pour chaque cas, relever
 
 ---
 
-## 5. Plan de correction — **pas encore codé**
+## 5. Plan de correction — **codé, en attente de validation**
 
 Ordre de priorité :
 
-- [ ] **1. P1** — Conditionner la force-ouverture de `#advanced` à une **hauteur** :
-      `@media (min-width: 768px) and (min-height: 560px)`.
-      **Ne jamais masquer `#btnMore` tant que le panneau peut être replié.**
-      → *débloque tout le paysage.*
-- [ ] **2. P3** — Faire tenir la rangée de boutons à 320 px : réduire `min-width`,
-      regrouper les commandes, ou basculer le groupe `ml-auto` sur une 3ᵉ ligne.
-      Seuil empirique du symptôme : **≤ ~380 px**, pas 600.
-- [ ] **3. P2** — Poser un **plancher** sur `#stage` (`min-height`),
-      et exprimer le tiroir mobile en **fraction du stage** (`flex: 0 0 46 %`)
-      au lieu de `46vh` → il ne pourra plus dépasser l'espace disponible.
-- [ ] **4. P4** — `max-height` + `overflow-y: auto` sur `#advanced`.
-- [ ] **5. P5** — Ajouter un **état réduit** du tiroir (et, en paysage court, du panneau
-      réglages) → c'est la demande explicite « collapsable ».
-- [ ] **6. P6** — **Unifier** CSS et JS sur un point de rupture de **hauteur** (`mqShort`) ;
-      gérer explicitement la rotation (fermer `adv-open` en entrant en zone courte,
-      rééquilibrer le tiroir) ; retirer le `return` prématuré de
-      `applyResponsiveLayout()` (`app.js:1817`) sur `layoutTouched`.
-- [ ] **7. H3** — Remplacer le `190px` de `#toastBox` par la hauteur réelle du transport
-      (mesurée), ou ancrer les toasts au `#stage`.
+- [x] **1. P1** — Force-ouverture de `#advanced` conditionnée à la **hauteur** :
+      `@media (min-width: 768px) and (min-height: 560px)` · `styles.css`.
+      `#btnMore` n'est plus supprimé sur un écran court → **recollement possible**.
+      → *débloque le paysage (Pixel 7a 915×412).* ✅
+- [x] **2. P3** — La rangée passe en `flex-wrap` (`index.html:87`) + `gap-1 md:gap-1.5`,
+      et `.btn-ctl:not(.btn-primary)` passe à `min-width:36px / padding:0 7px` sous 480 px.
+      **396 px utiles → tient sur 412 px** ; en dessous le groupe de droite bascule sur
+      une 2ᵉ ligne au lieu d'être rogné. ⚠️ Seuil du symptôme révisé : **≤ ~420 px**,
+      pas ~380 — l'ajout du bouton Décompte (`c17adbb`, 8ᵉ enfant) a coûté 44 px. ✅
+- [x] **3. P2** — `#drawer` mobile : `height:46vh` + **`max-height:46%`** + `overflow-y:auto`
+      (le `%` est résolu sur `#stage`, pas sur la fenêtre) ; `max-height:none` en ≥768.
+      Le tiroir ne peut plus déborder de `#stage` ni passer sous `#transport`. ✅
+- [x] **4. P4** — `#advanced` : `max-height: min(46dvh, 420px)` + `overflow-y:auto` +
+      `overscroll-behavior:contain` → le panneau défile au lieu de chasser la
+      partition. ✅
+- [ ] **5. P5** — État réduit du tiroir (et, en paysage court, du panneau réglages).
+      **Non fait** — le « collapsable » demandé est couvert par P1 (le panneau se
+      replie via `#btnMore`), mais le tiroir lui-même n'a toujours que 46 % / fermé.
+- [~] **6. P6** — Fait en partie : `mqShort = matchMedia('(max-height: 559px)')` +
+      `syncShortViewport()` suppriment `adv-open` en entrant en zone courte
+      (`app.js:19-21, 596-597`), en miroir exact de la condition CSS.
+      **Reste** : retirer le `return` prématuré de `applyResponsiveLayout()`
+      sur `layoutTouched`, et rééquilibrer le tiroir à la rotation.
+- [ ] **7. H3** — `#toastBox` ancré à `bottom: calc(safe-area + 190px)` : **non fait**
+      (nombre magique, gênant mais non bloquant).
 
-### Contraintes à respecter lors de l'implémentation
+### Contraintes respectées
 
-1. **3 fichiers seulement** — `index.html`, `css/styles.css`, `js/app.js`. Aucun 4ᵉ fichier.
-2. Le tiroir reste **« dans le flux »** (DAW) : jamais de recouvrement de la partition,
-   pas de backdrop, fermeture **uniquement** par `✕` / `Échap`.
-3. Les images `md:` de Tailwind et les `@media` de `styles.css` doivent rester **alignés** :
-   c'est précisément ce qui a cassé (P1).
-4. `node --check js/app.js` + contrôle U+FFFD (`[regex]::Matches($t,[char]0xFFFD).Count`)
-   avant de considérer la modification comme terminée.
+1. **3 fichiers** — `index.html`, `css/styles.css`, `js/app.js` (aucun 4ᵉ fichier ajouté).
+2. Le tiroir reste **dans le flux** (DAW) : pas de recouvrement, pas de backdrop,
+   fermeture uniquement par `✕` / `Échap`. ✅
+3. CSS `@media` et Tailwind `md:` restent alignés sur 768 px ; la **nouvelle** condition
+   n'existe **que** dans `styles.css` (`#advanced`) — `mqShort` en JS lui répond en
+   miroir. ✅
+4. `node --check js/app.js` + U+FFFD = 0 sur les 3 fichiers + `tools/load-smoke.js` OK. ✅
 
 ---
 
-## 6. ⚠️ Décision à prendre avant de coder
+## 6. ✅ Décision tranchée
 
 **Quel seuil pour la zone « mobile » ?**
 
 | Option | Avantage | Inconvénient |
 |---|---|---|
-| **640 px** (`sm`) | le plus proche du « <600 px » rapporté | c'est un seuil Tailwind **déjà utilisé** par `#advanced` (`grid-cols-2`) → risque d'un **4ᵉ** point de rupture |
+| **640 px** (`sm`) | le plus proche du « <600 px » rapporté | seuil Tailwind **déjà utilisé** par `#advanced` (`grid-cols-2`) → risque d'un **4ᵉ** point de rupture |
 | **768 px** (`md`) | celui **réellement en vigueur** (`mqDesktop`, `order`, `md:`, `!important`) | ne correspond pas au chiffre annoncé par le rapporteur |
 
-**Recommandation** : partir de **768** comme seuil principal (c'est la réalité du code),
-et ajouter une **condition de hauteur** à côté — pas un nouveau seuil de largeur.
-Sinon on ouvre une troisième zone grise (600–768) qui reproduira exactement le bug d'origine.
+**Décision** : **768 px comme unique seuil de largeur** + **`min-height: 560px`**
+en condition complémentaire — et surtout **pas de nouveau seuil de largeur**.
+
+**Justification chiffrée — Google Pixel 7a (cible de référence)**
+
+| Orientation | Viewport CSS | `< 600 px` ? | Seuil codé | Comportement obtenu |
+|---|---|---|---|---|
+| **Portrait** | **412 × 915** | ✔ 412 < 600 | < 768 | zone « mobile » : transport en bas, `#advanced` replié par défaut, tiroir en bas |
+| **Paysage** | **915 × 412** | ✘ 915 > 600 | ≥ 768 | **sans `min-height`** : `#advanced` forcé ouvert **et** `#btnMore` supprimé sur **412 px** de haut |
+
+- Le rapporteur raisonne en **largeur** — et il a raison pour le portrait (412 < 600).
+  Mais le **paysage échappe à ce test tout en étant le cas le plus cassé** :
+  915 px de large « prouvent » qu'on est en desktop, alors qu'il reste 412 px de haut.
+  → la largeur seule ne peut pas définir la zone.
+- Un seuil posé à 600 ou 640 créerait une **zone grise 600–768** sans règle : c'est
+  exactement le bug d'origine, simplement déplacé.
+- Choix de **560 px** : paysage de téléphone ≈ 412 ✗ (→ repliable), portable 1366×768 ✔
+  (→ forcé ouvert, comme avant), fenêtre réduite 800×500 ✗ (→ repliable).
+  **En dessous de 560 on rend le recollement, on ne le supprime jamais.**
+- Miroir JS : `mqShort = matchMedia('(max-height: 559px)')` → `app.js:19`.
 
 ---
 

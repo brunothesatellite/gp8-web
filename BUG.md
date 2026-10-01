@@ -1,6 +1,6 @@
 # CRITICAL
-* **TO BE CONFIRMED** La lecture de la piste audio, même seule, se désynchronise, avec parfois des micro retours, des sauts, des défaormations.
-* Le mode mobile (<600px) n'est pas fonctionnel : paramétrage impossible en vertical l'interface est en bas et masquée, en horizontal les paramètres masquent totalement la piste et ne sont pas collapsable.
+* **TO BE CONFIRMED - RISKY** La lecture de la piste audio, même seule, se désynchronise, avec parfois des micro retours, des sauts, des défaormations.
+* **ONGOING - RISKY** Le mode mobile (<600px) n'est pas fonctionnel : paramétrage impossible en vertical l'interface est en bas et masquée, en horizontal les paramètres masquent totalement la piste et ne sont pas collapsable.
 
 # MAJOR
 * N/A
@@ -9,8 +9,8 @@
 * N/A
 
 # EVOLUTIONS
-* ajouter un visuel pour la piste audio (forme d'onde)
-* Si le compte à rebour est activé et qu'une boucle est active, avoir une option permettant de jouer le compte à rebour à chaque boucle. Par défaut ce n'est joué qu'au démarrage (comme le comportement actuel). Cette option est grisée sur la boucle n'est pas activée : correction, simple, rapide et sans régression, ciblée.
+* **LOW - RISKY** ajouter un visuel pour la piste audio (forme d'onde)
+* **HIGH - RISKY** Si le compte à rebour est activé et qu'une boucle est active, avoir une option permettant de jouer le compte à rebour à chaque boucle. Par défaut ce n'est joué qu'au démarrage (comme le comportement actuel). Cette option est grisée sur la boucle n'est pas activée : correction, simple, rapide et sans régression, ciblée.
 
 # BACKLOG
-* le défilement doux masque la mesure en cours de lecture en mode horizontal, parchemin ou page => option masquée pour l'instant
+* **DISABLED - RISKY** le défilement doux masque la mesure en cours de lecture en mode horizontal, parchemin ou page => option masquée pour l'instant

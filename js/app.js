@@ -14,6 +14,12 @@
     let scrubbing = false;
     const UI_MS = 50;   // barre de progression : 20 Hz suffisent (344 Hz avant)
     const mqDesktop = window.matchMedia('(min-width: 768px)');
+/* miroir exact de la condition CSS `@media (min-width:768px) and (min-height:560px)`
+   (styles.css) : dès que l'écran est court, « Réglages » se replie. */
+const mqShort = window.matchMedia('(max-height: 559px)');
+function syncShortViewport() {
+  if (mqShort.matches) document.body.classList.remove('adv-open');
+}
 
     /* ---------- toasts ---------- */
     function toast(msg, type = 'info') {
@@ -583,6 +589,12 @@
 
       // responsive
       mqDesktop.addEventListener('change', applyResponsiveLayout);
+      /* P6 : la force-ouverture CSS de #advanced est désormais conditionnée
+         à la hauteur ; si « Réglages » était ouvert en portrait, la
+         rotation en paysage (915×412) ne doit pas laisser le panneau
+         consommer les 412 px disponibles. */
+      mqShort.addEventListener('change', syncShortViewport);
+      syncShortViewport();
     }
 
     /* ---------- boot ---------- */

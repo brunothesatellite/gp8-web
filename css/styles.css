@@ -75,11 +75,23 @@
   #progress::-webkit-slider-thumb{ width: 16px; height: 16px; margin-top: -5px; }
 
   /* =========================================================
-     PANNEAU AVANCÉ : replié sur mobile, toujours visible ≥ 768px
+     PANNEAU AVANCÉ : replié par défaut, forcé ouvert UNIQUEMENT
+     quand l'écran offre assez de place (largeur ET hauteur).
      ========================================================= */
-  #advanced { display: none; }
+  #advanced {
+    display: none;
+    /* P4 : un panneau ouvert ne doit jamais manger #stage — il défile
+       au lieu de pousser la partition hors de l'écran. */
+    max-height: min(46dvh, 420px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   body.adv-open #advanced { display: grid; }
-  @media (min-width: 768px){
+  /* P1 : « ≥768 » NE SUFFIT PAS. Un téléphone en paysage fait 915×412 :
+     la largeur seule ouvrait le panneau ET supprimait #btnMore, rendant
+     le recollement impossible sur 412 px de haut (« ne sont pas
+     collapsable »). La hauteur devient obligatoire. */
+  @media (min-width: 768px) and (min-height: 560px){
     #advanced { display: grid !important; }
     #btnMore  { display: none !important; }
   }
@@ -98,6 +110,16 @@
   .btn-ctl:active{ transform: translateY(1px); }
   .btn-ctl.is-on{ background: rgba(14,165,233,.20); border-color: rgba(56,189,248,.65); color:#7dd3fc; }
   .btn-ctl:disabled{ opacity:.38; cursor:not-allowed; }
+  /* P3 : la rangée de transport compte 8 enfants (6 boutons + Play +
+     le groupe Mélangeur/Réglages) = 428 px utiles. À 412 px — la
+     largeur CSS d'un Pixel 7a en portrait — elle débordait et rognait
+     #btnMore (dernier enfant), rendant les réglages inatteignables.
+     On resserre sous 480 px ; `flex-wrap` sur la rangée (index.html)
+     reste le filet de sécurité : rien n'est JAMAIS coupé, au pire la
+     groupe de droite passe sur une 2ᵉ ligne. */
+  @media (max-width: 480px){
+    .btn-ctl:not(.btn-primary){ min-width:36px; padding:0 7px; }
+  }
   .btn-primary{
     height:44px; min-width:52px; border-radius:12px;
     background: linear-gradient(180deg,#0ea5e9,#0284c7); border:1px solid rgba(56,189,248,.5);
@@ -124,12 +146,20 @@
     min-height:0;
     background:#0f172a;
     height:46vh;                       /* mobile : panneau bas, la partition rétrécit */
+    /* P2 : 46vh est mesuré sur le VUEXORD, pas sur #stage. Quand
+       transport + #advanced mangent la hauteur, le tiroir débordait de
+       #stage et son bas passait sous #transport (inaccessible). Il ne
+       peut désormais jamais dépasser 46 % de ce que #stage offre. */
+    max-height:46%;
+    overflow-y:auto;
+    overscroll-behavior:contain;
     border-top:1px solid rgba(148,163,184,.16);
   }
   body.drawer-open #drawer{ display:flex; }
   @media (min-width: 768px){
     #drawer{
       height:auto;
+      max-height:none;                 /* colonne : hauteur pilotée par le contenu */
       width:340px;                     /* desktop : colonne de droite */
       border-top:0;
       border-left:1px solid rgba(148,163,184,.16);
