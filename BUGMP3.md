@@ -495,3 +495,60 @@ Vérifications croisées utilisées dans ce document :
 * `<OriginalTempo>` / `<ModifiedTempo>` du GPIF ↔ pentes de la table générée ;
 * durée des mp3 par comptage de trames et par `taille × 8 / bitrate` (CBR 160 kbps) ;
 * premier octet de synchro mp3 : `FF FB A4` → MPEG-1 Layer III, `srIdx = 1` → 48 000 Hz.
+
+---
+
+## 11. Résultats après correction
+
+**Correctifs appliqués** dans `js/mix-sync.js` (seul fichier de l'app modifié) :
+
+1. **Dédoublonnage des `synthTime` identiques** (`analyzeSegments`) : on garde le
+   **dernier** doublon — sémantique exacte d'alphaTab. → supprime le saut de 1,6 s
+   au démarrage (annexe 4.4).
+2. **Détection des discontinuités** : un segment est un « saut » si l'axe audio
+   **recule** (Δa < 0) ou a une pente hors `[1/3 ; 3]`. Le seuil `|Δa − Δt| > 1 000 ms`
+   proposé en §9.4 a été **écarté** : il confond un long segment à tempo modéré
+   (ex. pente 0,818 sur 6 s → écart 1 092 ms) avec une discontinuité.
+3. **Re-ancrage des sauts** : la cible ne **balaye plus** `p.a → q.a` sur Δt. Elle
+   saute à l'entrée du segment vers le bloc destination, puis le rejoint sans couture
+   en `q.t`. → **un seul seek** par discontinuité, au lieu d'un balayage saccadé.
+4. **Rate piloté sur la pente locale** : `playbackRate = vitesse × penteLocale ×
+   (1 − correction de dérive)`, pente clampée à `[0,5 ; 2,0]`. Le mp3 converge vers le
+   tempo du MIDI (`preservesPitch` actif : aucune transposition). → fin de la sécussion.
+5. **Alerte** : `console.warn('[mix] tempo hors plage …')` au build pour les segments
+   que le rate ne peut pas suivre.
+
+**Validation** — harnais déterministe `tools/sync-audit.js` (simulation `correct()`
+hors navigateur, deux variantes sur la table `generateSyncPoints` réelle) sur les 14
+`samples/*.gp`. La variante LEGACY reproduit la baseline du tableau §7 à ±1 près
+(ACDC 53/4, Iron Maiden 224/153, Renaud 195/88, Offspring 10/4 …) — le modèle est validé.
+
+| métrique (14 fichiers) | LEGACY | NEW | gain |
+|---|---:|---:|---:|
+| recadrages durs | 627 | 44 | −93 % |
+| dont retours en arrière | 344 | 16 | −95 % |
+| **dont GLITCHS (dérive — le vrai saccade)** | **397** | **10** | **−97,5 %** |
+| pire burst (seeks / 1,5 s) | 7 | 4 | −43 % |
+
+Par symptôme signalé dans `BUG.md` :
+
+* **Helloween – Dr. Stein** : glitchs **95 → 0**, recadrages 102 → 1. Les retours
+  audio des mesures 16-19 sont **éliminés**.
+* **ACDC – Highway to Hell** (CRITICAL) : glitchs 15 → 3, burst 7 → 2. Le DS al Coda
+  ne fait plus qu'**un saut propre** au lieu de faire « sauter l'audio ».
+
+Les seeks restants de NEW sont **volontés** : ce sont les sauts aux répétitions
+(DS al Coda, D.C.) — **1 par discontinuité**. Un `maxArr` élevé (Renaud −194 s) est la
+**taille du saut voulu** (la répétition renvoie bien à cette position audio), pas un raté.
+
+**Limite connue — Phase 3 (non couverte)** : là où alphaTab perd des points de synchro
+(ACDC 16/80, Renaud 43/156), le `BarOccurrence` d'alphaTab ne colle pas à celui de GP :
+le saut est maintenant **propre** mais peut viser une position audio légèrement décalée de
+la « vraie » occurrence chronologique. La correction définitive (§9.6) consiste à
+reconstruire les occurrences depuis l'ordre des `FrameOffset` — à faire si besoin.
+
+**Reproduction / non-régression** :
+* `node tools/sync-audit.js` (options `--debug` : liste les segments de saut ;
+  `--gp <fichier>` : un seul .gp ; `--dt <ms>` : pas de simulation).
+* `node tools/load-smoke.js` : chargement + bindings.
+* alphaTab 1.8.4 est téléchargé une fois dans `tools/vendor/` (ignoré par git).

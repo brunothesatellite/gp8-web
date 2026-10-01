@@ -1,2 +1,5 @@
 # dossier reconstruit a chaque fois par deploy\deploy.bat
 deploy/gp8-web/
+
+# dépendance de test téléchargée (alphaTab 1.8.4, ré-fetchée par tools/sync-audit.js)
+tools/vendor/alphaTab.js

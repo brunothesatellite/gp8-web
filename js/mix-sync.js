@@ -59,7 +59,23 @@
     const STALL_RATIO = 0.5; // maître en avance < 50 % du réel = à l'arrêt
     const STAT_MS    = 5000; // périodicité du rapport d'instrumentation
 
-    let points  = [];      // [{ t: synthTime, a: syncTime }] trié par t
+    /* --- discontinuités + pente locale (correctif BUGMP3) -------------
+       Un segment [p → q] est un SAUT (discontinuité à re-ancrer) quand l'axe
+       audio fait un mouvement impossible pour un tempo : il RECULE (Δa < 0)
+       ou bondit hors de toute plage musicale (pente hors [1/JUMP_SLOPE,
+       JUMP_SLOPE]). Ces segments ne doivent JAMAIS être balayés par
+       l'interpolation : on les re-ancre sur le bloc destination (cf. build +
+       audioMsFor) → un seul seek par discontinuité. Un simple écart de tempo
+       — même fort — reste géré par la pente locale (da/dt), qui pilote
+       playbackRate : le mp3 converge vers le tempo du MIDI au lieu de sécuer
+       dans les limites de ±10 %.                                           */
+    const JUMP_SLOPE = 3.0;  // au-delà : téléport audio, pas un tempo
+    const SLOPE_MIN  = 0.5;  // clamp de la pente locale → rate plancher
+    const SLOPE_MAX  = 2.0;  // clamp de la pente locale → rate plafond
+
+    let points  = [];      // [{ t, a, jump, slope, rawSlope }] trié par t
+    let nJump   = 0;       // nb de segments de saut (discontinuités)
+    let nOff    = 0;       // nb de segments à pente hors plage
     let bias    = 0;       // décalage constant éventuel (calage manuel)
     let playing = false;
     let active  = false;
@@ -98,8 +114,11 @@
           .filter(p => p && isFinite(p.synthTime) && isFinite(p.syncTime))
           .map(p => ({ t: p.synthTime, a: p.syncTime }))
           .sort((x, y) => x.t - y.t);
+        analyzeSegments();               // dédoublonne + détecte les sauts + pentes
         note = points.length
           ? points.length + ' point(s) de synchro'
+            + (nJump ? ' · ' + nJump + ' saut(s)' : '')
+            + (nOff ? ' · ' + nOff + ' pente(s) hors plage' : '')
           : 'aucun point de synchro → axe temporel linéaire';
       } catch (e) {
         console.warn('[mix] generateSyncPoints', e);
@@ -110,6 +129,68 @@
       return points.length;
     }
 
+    /* ---- analyse des segments : dédoublonnage + sauts + pentes --------
+       1. dédoublonne les `t` identiques en gardant le DERNIER — exactement la
+          sémantique d'alphaTab (`while (next.synthTime <= t) i++` avance au-
+          delà de tous les points de même t). Supprime le saut de démarrage
+          quand un fichier a plusieurs points à synthTime = 0 (Dr. Stein).
+       2. flague chaque segment [i → i+1] « saut » si l'axe audio fait un
+          mouvement impossible pour un tempo : recul (Δa < 0) ou pente hors
+          [1/JUMP_SLOPE, JUMP_SLOPE] (vraie discontinuité, à re-ancrer).
+       3. calcule la pente locale (da/dt) ; pour un segment de saut, la pente
+          devient celle du bloc DESTINATION : l'extrapolation rejoint alors le
+          bloc suivant sans discontinuité en q.t, et un seul seek suffit au
+          franchissement (voir audioMsFor).                                  */
+    function analyzeSegments() {
+      nJump = 0; nOff = 0;
+      // 1. dédoublonnage : garder le dernier point de chaque t
+      const dedup = [];
+      for (const p of points) {
+        while (dedup.length && p.t <= dedup[dedup.length - 1].t) dedup.pop();
+        dedup.push(p);
+      }
+      points = dedup;
+
+      const n = points.length;
+      // 2. sauts + pentes naturelles (clampees)
+      for (let i = 0; i < n; i++) {
+        const p = points[i], q = points[i + 1];
+        if (!q) { p.jump = false; p.slope = 1; p.rawSlope = 1; continue; }
+        const dt = q.t - p.t, da = q.a - p.a;
+        p.rawSlope = dt > 0 ? da / dt : 1;
+        p.jump = (da < 0) || (p.rawSlope < 1 / JUMP_SLOPE) || (p.rawSlope > JUMP_SLOPE);
+        p.slope = clamp(p.rawSlope, SLOPE_MIN, SLOPE_MAX);
+        if (p.jump) nJump++;
+        else if (p.rawSlope < SLOPE_MIN || p.rawSlope > SLOPE_MAX) nOff++;
+      }
+      // 3. segment de saut → pente du bloc destination (parcours inverse pour
+      //    chaîner proprement les sauts consécutifs).
+      for (let i = n - 1; i >= 0; i--) {
+        if (!points[i].jump) continue;
+        points[i].slope = (i + 1 < n) ? points[i + 1].slope : 1;
+      }
+
+      // alerte : signale les segments que le rate ne PEUT pas suivre, plutôt
+      // que de saccader silencieusement (les sauts sont déjà gérés).
+      if (nJump || nOff) {
+        const bad = [];
+        for (let i = 0; i < n && bad.length < 3; i++) {
+          const p = points[i];
+          if (p.jump) bad.push('#' + i + ' saut');
+          else if (p.rawSlope < SLOPE_MIN || p.rawSlope > SLOPE_MAX) {
+            bad.push('#' + i + ' pente ' + p.rawSlope.toFixed(2));
+          }
+        }
+        const total = nJump + nOff;
+        console.warn(
+          '[mix] tempo hors plage — ' + nJump + ' saut(s), ' + nOff +
+          ' pente(s) hors [' + SLOPE_MIN + ', ' + SLOPE_MAX + ']' +
+          (bad.length ? ' · ' + bad.join(' · ') : '') +
+          (total > 3 ? ' · et ' + (total - 3) + ' autre(s)' : '')
+        );
+      }
+    }
+
     /* ---- synthTime (ms) → position audio (ms) ---- */
     function audioMsFor(t) {
       const n = points.length;
@@ -118,10 +199,12 @@
 
       if (t <= points[0].t) {                       // avant le 1er point
         const p = points[0], q = points[1], dt = q.t - p.t;
+        if (p.jump) return q.a + (t - q.t) * p.slope + bias;   // re-ancré
         return p.a + (dt > 0 ? (t - p.t) * (q.a - p.a) / dt : t - p.t) + bias;
       }
       if (t >= points[n - 1].t) {                   // après le dernier point
         const p = points[n - 1], q = points[n - 2], dt = p.t - q.t;
+        if (q.jump) return p.a + (t - p.t) * q.slope + bias;   // re-ancré
         return p.a + (dt > 0 ? (t - p.t) * (p.a - q.a) / dt : t - p.t) + bias;
       }
 
@@ -131,7 +214,29 @@
         if (points[mid].t <= t) lo = mid; else hi = mid - 1;
       }
       const p = points[lo], q = points[lo + 1], dt = q.t - p.t;
+      /* Segment de saut (discontinuité) : on NE balaye PAS p.a → q.a sur Δt.
+         On se re-ancre sur le bloc destination : la cible saute à l'entrée du
+         segment (un SEUL seek) puis rejoint q.a en q.t avec la pente du bloc
+         destination, et se poursuit sans couture dans le bloc suivant. */
+      if (p.jump) return q.a + (t - q.t) * p.slope + bias;
       return p.a + (q.a - p.a) * (dt > 0 ? (t - p.t) / dt : 0) + bias;
+    }
+
+    /* pente locale (da/dt) du segment contenant t — c'est le facteur qui doit
+       multiplier playbackRate pour que l'audio suive le tempo du pont. Elle est
+       clampee a [SLOPE_MIN, SLOPE_MAX] : hors de cette plage le rate ne peut
+       plus suivre, la derive residuelle est rattrapee par les seeks (HOLD_MS). */
+    function slopeAt(t) {
+      const n = points.length;
+      if (n < 2) return 1;
+      if (t <= points[0].t) return points[0].slope;
+      if (t >= points[n - 1].t) return points[n - 2].slope;
+      let lo = 0, hi = n - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (points[mid].t <= t) lo = mid; else hi = mid - 1;
+      }
+      return points[lo].slope;
     }
 
     /* vitesse réellement appliquée par alphaTab (source de vérité) */
@@ -140,13 +245,23 @@
       return (a && a.playbackSpeed > 0) ? a.playbackSpeed : speed;
     }
 
+    /* pente locale courante du pont (da/dt) — facteur qui multiplie le rate
+       pour que l'audio suive le tempo noté au lieu de sécuer sur sa dérive. */
+    function slopeNow() {
+      const api = Player.S.api;
+      if (!api) return 1;
+      return slopeAt(api.timePosition * curSpeed());
+    }
+
     /* ---- cible (secondes) sur l'axe audio ---- */
     function targetSeconds() {
       const api = Player.S.api;
       if (!api) return null;
       // alphaTab multiplie par playbackSpeed avant d'interpoler
       const ms = audioMsFor(api.timePosition * curSpeed());
-      return isFinite(ms) && ms >= 0 ? ms / 1000 : null;
+      // On borne à 0 (et non null) : un syncTime négatif (ACDC: -1014 ms) ne
+      // doit pas laisser la cible indéfinie et désactiver toute correction.
+      return isFinite(ms) ? Math.max(0, ms) / 1000 : null;
     }
 
     function seekTo(sec) {
@@ -236,15 +351,19 @@
       if (stalled) { nStall++; return; }
 
       const sp = curSpeed();
+      const slope = slopeNow();                       // pente locale (clampée)
       if (Math.abs(drift) > HOLD_MS) {                // recadrage franc
         seekTo(target);
-        setRate(sp);
+        setRate(sp);                                  // réapplique vitesse × pente
         nSeek++;
         return;
       }
       if (Math.abs(drift) < DEADBAND_MS) return;      // zone morte : on n'y touche pas
       if (now - lastWrite < WRITE_MS) return;         // pas d'écriture rapprochée
-      const r = Math.max(0.06, sp * (1 - clamp(drift / GAIN, -NUDGE, NUDGE)));
+      // rate = vitesse × pente locale × micro-correction de dérive (±NUDGE).
+      // La pente fait converger le mp3 vers le tempo du MIDI ; la correction
+      // finit le calage. preservesPitch évite toute transposition.
+      const r = Math.max(0.06, sp * slope * (1 - clamp(drift / GAIN, -NUDGE, NUDGE)));
       if (Math.abs(a.playbackRate - r) > RATE_EPS) {  // seuil large : le bruit est ignoré
         a.playbackRate = r;
         lastWrite = now;
@@ -283,7 +402,8 @@
       const a = el();
       if (!a) return;
       try { a.preservesPitch = true; } catch (e) {}
-      a.playbackRate = clamp(speed, 0.06, 16);
+      // vitesse utilisateur × pente locale du pont : l'audio suit le tempo noté
+      a.playbackRate = clamp(speed * slopeNow(), 0.06, 16);
     }
 
     /* ---- cycle de vie ---- */
