@@ -52,13 +52,29 @@
         bufferTimeInMilliseconds: 800
       }
     },
-    samples: [
-      { label: 'Sepultura — Amen',                    file: 'Sepultura (1993 - Chaos A.D.) - Amen.gp' },
-      { label: 'Iron Maiden — Fear of the Dark',      file: 'Iron Maiden (1992 - Fear of the Dark) - Fear of the Dark.gp' },
-      { label: 'Slayer — Hell Awaits',                file: 'Slayer (1985 - Hell Awaits) - Hell Awaits.gp' },
-      { label: 'Helloween — Dr. Stein',               file: 'Helloween (1988 - Keeper of the Seven Keys - Part II) - Dr. Stein.gp' },
-      { label: 'Renaud — Morgane de toi',             file: 'Renaud (1983 - Morgane de toi) - Morgane de toi (amoureux de toi).gp' },
-      { label: 'F-Zero X — Goal BGM',                 file: 'F-Zero X (1998) - Goal BGM.gp' }
+    /* INDEX LOCAL des fichiers d'exemple — REPLI quand le serveur ne sait pas
+       lister un dossier. Les libellés ne sont PAS écrits ici : sampleLabel()
+       les déduit du nom de fichier, de sorte que ce tableau ne puisse pas
+       désynchroniser libellé / chemin.
+       ⚠ N'est utilisé QUE si le scan HTTP a échoué (PHP `php -S`, Live
+       Server… renvoient 404 sur un dossier sans index) ; avec un serveur qui
+       expose un listing (python http.server), c'est le SCAN qui remplit la
+       liste et tout fichier ajouté apparaît sans toucher au code. */
+    sampleFiles: [
+      'ACDC (1979 - Highway to Hell) - Highway to Hell.gp',
+      'Blink 182 (1999 - Enema Of The State) - All the Small Things v2.gp',
+      'Europe (1986 - The Final Countdown) - The Final Countdown v3.gp',
+      'F-Zero X (1998) - Goal BGM.gp',
+      'Helloween (1988 - Keeper of the Seven Keys - Part II) - Dr. Stein.gp',
+      'Igorrr (2025 - Amen) - Blastbeat Falafel.gp',
+      'Igorrr (2025 - Amen) - Headbutt.gp',
+      'Iron Maiden (1992 - Fear of the Dark) - Fear of the Dark.gp',
+      'Led Zeppelin (1970 - Led Zeppelin III) - Immigrant Song.gp',
+      'Metallica (1984 - Ride the Lightning) - For Whom the Bell Tolls v4.gp',
+      'Renaud (1983 - Morgane de toi) - Morgane de toi (amoureux de toi).gp',
+      'Sepultura (1993 - Chaos A.D.) - Amen.gp',
+      'Slayer (1985 - Hell Awaits) - Hell Awaits.gp',
+      'The Offspring (1994 - Smash) - Self Esteem.gp'
     ]
   };
 
@@ -1295,13 +1311,16 @@
     }
 
     /* ---------- samples ----------
-       Le navigateur ne peut PAS lister un dossier depuis file:// (fetch sur
-       une URL `file:` y est bloqué). Deux régimes décidés au démarrage :
+       TROIS régimes, décidés au démarrage :
          file://  → la section « Fichiers d'exemple » disparaît complètement
-                    (un fichier déposé/traversé reste, lui, disponible).
-         http://  → on scanne `samples/` (page d'index renvoyée par le
-                    serveur) : la liste reflète ce qui est RÉELLEMENT sur le
-                    disque, sans jamais retoucher au code.               */
+                    (fetch sur une URL `file:` est bloqué ; un fichier déposé
+                    ou traversé reste, lui, parfaitement disponible).
+         http:// + listing    → on scanne `samples/` : la liste reflète ce qui
+                    est RÉELLEMENT sur le disque, sans retoucher au code.
+         http:// SANS listing → 404. `php -S` et Live Server ne produisent
+                    AUCUN index de dossier (ils ne cherchent qu'index.php /
+                    index.html) : on retombe sur CFG.sampleFiles, l'index local
+                    complet. Ce n'est donc plus une erreur, mais un repli.   */
     const SAMPLE_RE = /\.(gp|gpx|gp5)$/i;
 
     function sampleLabel(file) {
@@ -1309,6 +1328,14 @@
       // « Artiste (1993 - Album) - Titre.gp » → « Artiste — Titre »
       const m = base.match(/^(.+?)\s*\([^)]*\)\s*-\s*(.+)$/);
       return m ? `${m[1]} — ${m[2]}` : base;
+    }
+
+    /* Index local → mêmes objets que le scan, mêmes libellés, même tri :
+       les deux chemins produisent donc une liste INDISTINGUABLE. */
+    function staticSamples() {
+      return CFG.sampleFiles
+        .map(f => ({ file: f, label: sampleLabel(f) }))
+        .sort((x, y) => x.label.localeCompare(y.label, 'fr'));
     }
 
     async function scanSamples() {
@@ -1331,12 +1358,15 @@
       return out;
     }
 
-    function renderSamples(list) {
+    function renderSamples(list, scanned) {
       const box = $('#sampleList');
       const hint = $('#sampleHint');
       box.innerHTML = '';
       if (hint) {
-        hint.textContent = `${list.length} fichier${list.length > 1 ? 's' : ''} · audio embarqué inclus`;
+        const n = `${list.length} fichier${list.length > 1 ? 's' : ''}`;
+        // « liste locale » = le serveur n'a pas de listing → diagnostic lisible
+        hint.textContent = scanned ? `${n} · audio embarqué inclus`
+                                   : `${n} · liste locale · audio embarqué inclus`;
       }
       list.forEach(s => {
         const b = document.createElement('button');
@@ -1362,10 +1392,20 @@
         if (section) section.classList.add('hidden');
         return;
       }
-      let list = CFG.samples;
-      try { list = CFG.samples = await scanSamples(); }
-      catch (e) { console.warn('[samples] scan impossible → liste en dur conservée', e); }
-      renderSamples(list);
+      let list, scanned = false;
+      try {
+        list = await scanSamples();
+        scanned = true;
+        // l'index local se resynchronise dès qu'un listing est disponible
+        CFG.sampleFiles = list.map(s => s.file);
+      } catch (e) {
+        // 404 = serveur sans listing de dossier (php -S, Live Server…) :
+        // ce n'est pas une panne, c'est le régime normal de ces serveurs.
+        list = staticSamples();
+        console.info('[samples] pas de listing HTTP (' + (e && e.message) +
+                     ') → index local de ' + list.length + ' fichiers');
+      }
+      renderSamples(list, scanned);
     }
 
     async function loadSample(s) {
@@ -1378,9 +1418,14 @@
         loader(false);
         Player.loadFile(file, s.label);
       } catch (e) {
-        console.error(e);
+        console.error('[samples]', e);
         loader(false);
-        toast('Chargement impossible en file:// — utilisez un serveur local (Live Server).', 'error');
+        // Ne pas accuser file:// quand on est bien sur un serveur :
+        // le vrai problème est alors un fichier absent (HTTP 404).
+        toast(location.protocol === 'file:'
+              ? 'Chargement impossible en file:// — servez le dossier en HTTP.'
+              : `« ${s.label} » introuvable sur le serveur (${e && e.message}).`,
+              'error');
       }
     }
 
