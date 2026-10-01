@@ -81,6 +81,19 @@
     }
 
     /* ---------- score loaded : remplir les UI ---------- */
+    /* BPM d'origine du .GP — `score.tempo`, getter alphaTab (l.3480) qui
+       renvoie la tempo initiale du fichier (120 s'il n'y en a pas) — et
+       BPM réellement lu à la vitesse courante : « 150% · 120→180 ».
+       Avant chargement : simple pourcentage. */
+    function refreshSpeedLabel(score) {
+      const sc  = score || Player.S.score;
+      const pct = +$('#speed').value;
+      const bpm = sc && isFinite(sc.tempo) && sc.tempo > 0 ? Math.round(sc.tempo) : 0;
+      $('#speedVal').textContent = bpm
+        ? pct + '% · ' + bpm + '→' + Math.round(bpm * pct / 100)
+        : pct + '%';
+    }
+
     function onScoreLoaded(score) {
       // titre
       const title = [score.title, score.artist].filter(Boolean).join(' — ') || 'Sans titre';
@@ -97,6 +110,7 @@
       fillBarSelect($('#loopStart'), score.masterBars.length);
       fillBarSelect($('#loopEnd'),   score.masterBars.length);
       $('#loopStart').disabled = $('#loopEnd').disabled = false;
+      refreshSpeedLabel(score);
       $('#btnApplyLoop').disabled = false;
       $('#btnClearLoop').disabled = true;        // aucune plage au chargement
       $('#loopStart').value = '0';
@@ -517,7 +531,7 @@
         Player.setMetronomeVolume(+e.target.value / 100);
       });
       $('#speed').addEventListener('input', e => {
-        paintRange(e.target); $('#speedVal').textContent = e.target.value + '%';
+        paintRange(e.target); refreshSpeedLabel();
         Player.setSpeed(+e.target.value / 100);
       });
 
