@@ -9,7 +9,7 @@ Ne code rien, fait juste une analyse.
 Helloween (1988 - Keeper of the Seven Keys - Part II) - Dr. Stein.gp : je lance la lecture mesure 16, j'ai un léger retour en arrière audio en mesure 18 et 19
 
 # MAJOR
-* N/A
+* **HIGH - LOW RISK** en mode paysage ou portrait sur android, garantir qu'on voit toujours au moins une piste dans le tiroir de piste
 
 # MINOR
 * N/A
