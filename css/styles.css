@@ -153,3 +153,10 @@
   /* faders par piste */
   .mx-vol{ height:14px; width:74px; flex-shrink:0; min-width:0; }
   @media (max-width: 480px){ .mx-vol{ width:96px; } }
+
+  /* compte à rebours 4-3-2-1 (overlay de démarrage, cf. app.js showCountIn) */
+  #countInNum.pop{ animation: countInPop 260ms ease-out; }
+  @keyframes countInPop{
+    from{ transform:scale(1.45); opacity:0; }
+    to  { transform:scale(1);    opacity:1; }
+  }

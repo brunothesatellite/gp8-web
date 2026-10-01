@@ -48,7 +48,11 @@
   <!-- =========================================================
        ZONE DE DÉPÔT (overlay plein écran)
        ========================================================= -->
-  <div id="dropOverlay" class="hidden fixed inset-0 z-[80] bg-sky-500/10 backdrop-blur-sm items-center justify-center">
+      <!-- Compte à rebours visuel (4-3-2-1) : pur overlay, aucun lien avec alphaTab -->
+    <div id="countIn" class="pointer-events-none fixed inset-0 z-[79] hidden items-center justify-center">
+      <span id="countInNum" class="select-none bg-gradient-to-b from-sky-200 to-sky-500 bg-clip-text font-bold leading-none text-transparent text-[24vmin] drop-shadow-[0_0_30px_rgba(14,165,233,0.6)]">4</span>
+    </div>
+    <div id="dropOverlay" class="hidden fixed inset-0 z-[80] bg-sky-500/10 backdrop-blur-sm items-center justify-center">
     <div class="mx-6 rounded-3xl border-2 border-dashed border-sky-400/70 bg-slate-900/90 px-10 py-12 text-center shadow-2xl">
       <div class="text-5xl">📂</div>
       <p class="mt-4 text-lg font-semibold text-sky-300">Déposez votre fichier Guitar Pro</p>

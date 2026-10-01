@@ -269,6 +269,35 @@
       b.disabled = !synthActive;
       b.title = synthActive ? 'Métronome (M)' : 'Métronome indisponible en mode piste audio';
     }
+    /* ---- overlay du compte à rebours (pur visuel, aucun son propre) ----
+       Déclenché par Player.play() au même instant où alphaTab lance son
+       count-in ; l'horloge est simplement une série de setTimeout. */
+    let countInTimers = [];
+    function showCountIn(beats, beatMs) {
+      hideCountIn();
+      const box = $('#countIn'), num = $('#countInNum');
+      if (!box || !num) return;
+      beatMs = beatMs > 0 ? beatMs : 500;
+      beats  = beats > 1 ? Math.round(beats) : 4;
+      box.classList.remove('hidden');
+      box.classList.add('flex');
+      const tick = v => {
+        num.textContent = String(v);
+        num.classList.remove('pop');
+        void num.offsetWidth;              // relance l'animation
+        num.classList.add('pop');
+        if (v > 1) countInTimers.push(setTimeout(() => tick(v - 1), Math.round(beatMs)));
+      };
+      tick(beats);
+      countInTimers.push(setTimeout(hideCountIn, Math.round(beatMs * beats)));
+    }
+    function hideCountIn() {
+      countInTimers.forEach(clearTimeout);
+      countInTimers = [];
+      const box = $('#countIn');
+      if (box) { box.classList.add('hidden'); box.classList.remove('flex'); }
+    }
+
     function syncCountIn(on, synthActive) {
       const b = $('#btnCountIn');
       b.classList.toggle('is-on', !!on);
@@ -593,7 +622,7 @@
     return {
       boot, toast, loader, armLoaderWatchdog, hideEmptyState, showEmptyState,
       onScoreLoaded, updatePosition,
-      syncPlayBadge, syncMetronome, syncCountIn, syncLoop, onPlaybackRange,
+      syncPlayBadge, syncMetronome, syncCountIn, showCountIn, hideCountIn, syncLoop, onPlaybackRange,
       refreshMixStates, openDrawer, closeDrawer
     };
   })();

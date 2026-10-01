@@ -19,6 +19,7 @@
       metronomeVolume: 0.6,
       metronomeOn: false,
       countInOn: false,
+      playing: false,
       loopOn: false,
       loopRange: null,       // plage A→B en cours (modèle local = vérité)
       currentBar: 0,
@@ -310,9 +311,11 @@
       /* --- état lecture --- */
       api.playerStateChanged.on(e => safe(() => {
         const playing = e.state === AT.PlayerState.Playing;
+        S.playing = playing;
         $('#icPlay').classList.toggle('hidden', playing);
         $('#icPause').classList.toggle('hidden', !playing);
         App.syncPlayBadge(playing);
+        if (!playing) App.hideCountIn();   // stop/pause pendant le décompte
         MixSync.onState(e.state);
       })());
 
@@ -364,9 +367,17 @@
     }
 
     /* -------- Transport -------- */
-    const play      = () => { if (S.api) S.api.play(); };
+    const play      = () => {
+      if (!S.api) return;
+      /* alphaTab ne lance le count-in QUE depuis AlphaSynth.play()
+         (l.39959) : un passage de boucle passe par checkForFinish et
+         n'y revient jamais → l'overlay ne s'affiche qu'au lancement. */
+      const willCountIn = S.countInOn && !S.playing;
+      S.api.play();
+      if (willCountIn) App.showCountIn(countInBeats(), countInBeatMs());
+    };
     const pause     = () => { if (S.api) S.api.pause(); };
-    const toggle    = () => { if (S.api) S.api.playPause(); };
+    const toggle    = () => { if (S.playing) pause(); else play(); };
     /* alphaTab.stop() pose DÉJÀ le curseur sur `playbackRange.startTick ?? 0`
        (AlphaSynth.stop, l.39999) : forcer `tickPosition = 0` envoyait un
        tick HORS plage A→B. */
@@ -450,6 +461,18 @@
     function applyCountInVolume() {
       if (!S.api) return;
       S.api.countInVolume = S.countInOn ? S.metronomeVolume : 0;
+    }
+    /* base du compte à rebours visuel : alphaTab génère le count-in avec
+     * `tempoChanges[0].tempo` (l.35368) et le nombre de temps de la
+     * signature (l.35130), puis le joue au `playbackSpeed` courant. */
+    function countInBeats() {
+      const mb = S.score && S.score.masterBars[0];
+      return (mb && mb.timeSignatureNumerator > 0) ? mb.timeSignatureNumerator : 4;
+    }
+    function countInBeatMs() {
+      const bpm = S.score && isFinite(S.score.tempo) && S.score.tempo > 0 ? S.score.tempo : 120;
+      const sp  = S.api && isFinite(S.api.playbackSpeed) && S.api.playbackSpeed > 0 ? S.api.playbackSpeed : 1;
+      return 60000 / (bpm * sp);
     }
 
     /* -------- Volumes --------
