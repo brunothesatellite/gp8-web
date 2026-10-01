@@ -1,6 +1,5 @@
 # CRITICAL
-* **TO BE CONFIRMED - RISKY** La lecture de la piste audio, même seule, se désynchronise, avec parfois des micro retours, des sauts, des défaormations : reproductible sur ACDC, vers 45" quand il ya un retour, à identifier finement pour guider l'investigation.
-* **ONGOING - RISKY** Le mode mobile (<600px) n'est pas fonctionnel : paramétrage impossible en vertical l'interface est en bas et masquée, en horizontal les paramètres masquent totalement la piste et ne sont pas collapsable.
+* **TO BE CONFIRMED - RISKY** La lecture de la piste audio, même seule, se désynchronise, avec parfois des micro retours, des sauts, des défaormations : reproductible sur ACDC, vers 45" quand il ya un retour, à identifier finement pour guider l'investigation : à la fin mesure 18, vers le Da Al Coda à ~1', là l'audio saute
 
 # MAJOR
 * N/A
