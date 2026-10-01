@@ -145,7 +145,7 @@
           const dragging = !!sel && !!end && sel.beat !== end.beat;
           if (dragging || !S.loopRange) return orig.call(this);
           const tc = this.tickCache;
-          if (tc && sel && sel.beat) this.tickPosition = tc.getBeatStart(sel.beat);
+          if (tc && sel && sel.beat) seekTick(tc.getBeatStart(sel.beat));
         };
       } catch (e) {
         console.warn('[vendor] conservation de la boucle au clic impossible', e);
@@ -276,8 +276,16 @@
         MixSync.onState(e.state);
       })());
 
-      /* --- fin de morceau --- */
+      /* --- fin de morceau ---
+         alphaTab déclenche `finished` À CHAQUE fin de passage d'une boucle
+         (AlphaSynth.checkForFinish, branche `isLooping` — alphaTab.js
+         l.40121-40124), pas seulement en fin de morceau. Traiter ça comme
+         une fin couperait la lecture au second passage : MixSync.onState(null)
+         mettrait en pause la piste audio embarquée (elle ne sonnerait plus
+         qu'à la 1re boucle) et l'icône basculerait sur « lecture » alors que
+         tout continue. `isLooping` est vrai exactement dans ce cas-là. */
       api.playerFinished.on(() => safe(() => {
+        if (S.api && S.api.isLooping) return;   // fin de passage, pas fin de morceau
         $('#icPlay').classList.remove('hidden');
         $('#icPause').classList.add('hidden');
         App.syncPlayBadge(false);
@@ -319,7 +327,35 @@
     const play      = () => { if (S.api) S.api.play(); };
     const pause     = () => { if (S.api) S.api.pause(); };
     const toggle    = () => { if (S.api) S.api.playPause(); };
-    const stop      = () => { if (S.api) { S.api.stop(); S.api.tickPosition = 0; MixSync.resync(); } };
+    /* alphaTab.stop() pose DÉJÀ le curseur sur `playbackRange.startTick ?? 0`
+       (AlphaSynth.stop, l.39999) : forcer `tickPosition = 0` envoyait un
+       tick HORS plage A→B. */
+    const stop      = () => { if (S.api) { S.api.stop(); MixSync.resync(); } };
+
+    /* -------- Positionnement sûr --------
+       alphaTab BORNE la position interne dans la plage A→B (`mainSeek`,
+       l.35041-35044) mais rapporte ensuite la valeur BRUTE reçue
+       (`set timePosition` → `updateTimePosition`, l.39866-39869). Écrire un
+       tick hors plage a donc deux effets :
+         1. le curseur rapporté ne correspond plus à la position jouée —
+            la désynchro visuelle « le curseur est au début alors que la
+            boucle tourne » ;
+         2. `_timePosition` (axe réel) diverge de `state.currentTime`
+            (axe musical) : le prochain re-claquage recalcule depuis la
+            valeur fausse. Un changement de vitesse en est un —
+            `updatePlaybackSpeed` fait `timePosition *= old / new`
+            (l.39846-39850), soit un `mainSeek` complet — d'où un second
+            saut du curseur à ce moment-là.
+       On borne donc TOUTES nos écrits exactement comme `mainSeek`, pour que
+       son clamp devienne neutre (aucune écriture hors plage => invariant
+       réel/musical jamais cassé). */
+    function seekTick(tick) {
+      if (!S.api || !isFinite(tick)) return;
+      const r = S.api.playbackRange;
+      let t = Math.round(tick);
+      if (r) t = Math.min(Math.max(t, r.startTick), r.endTick);
+      S.api.tickPosition = Math.max(0, t);
+    }
 
     function seekRatio(r) {
       if (!S.api) return;
@@ -327,7 +363,7 @@
       const from  = range ? range.startTick : 0;
       const to    = range ? range.endTick   : S.api.endTick;
       if (to <= from) return;
-      S.api.tickPosition = Math.round(from + (to - from) * clamp(r, 0, 1));
+      seekTick(from + (to - from) * clamp(r, 0, 1));
       MixSync.resync();
     }
 
@@ -335,7 +371,9 @@
       if (!S.score) return;
       const count = S.score.masterBars.length;
       const next  = clamp(S.currentBar + delta, 0, count - 1);
-      S.api.tickPosition = S.score.masterBars[next].start;
+      // borné par la plage A→B quand une boucle est armée : alphaTab ferait
+      // le clamp de son côté et le curseur affiché partirait ailleurs
+      seekTick(S.score.masterBars[next].start);
       S.currentBar = next;
       $('#barLabel').textContent = `M. ${next + 1}/${count}`;
       MixSync.resync();
