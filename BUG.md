@@ -1,7 +1,6 @@
 **CRITICAL**
+* le son de la pister azudio est brouillée assez rapidement / saccadé
 * dans le tiroir l'icone "Isoler cette piste à l'affichage" doit se comporter comme un toggle d'affichage : affiche ou masque la piste. On doit pouvoir afficher 1 piste, plusieurs ou toutes.
-* le rendu de la piste audio ne fonctionne plus
-* le rendu de la piste est anormalement lent à chaque chargement de fichier
 * le défilement doux masque la mesure en cours de lecture, elle est trop à gauche de l'écran et on ne voit pas la barre verticale indiquant la lecture en cours
 * La boucle de mesure doit identifier visuellement sur la partition la boucle sélectionnée que ce soit défini manuellement ou avc la souris (même en cours de glisser)
 * quand je sélectionne une boucle de mesure, cela active automatiquement l'icone "boucle A -> B (L)". Je peux le désactiver manuellement.

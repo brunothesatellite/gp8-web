@@ -20,6 +20,13 @@
   #viewport { background: var(--sheet); }
   #scoreArea { background: var(--sheet); }
 
+  /* #pane = cellule NON défilante de #stage : elle porte #viewport ET les
+     overlays (#emptyState, #loader). NE JAMAIS rendre ces derniers enfants de
+     #viewport : `absolute inset-0` dans un conteneur `overflow:auto` s'ancre à
+     l'origine du CONTENU, pas à la zone visible → calque épinglé en haut de la
+     feuille, qui « flotte » au scroll au lieu de recouvrir la partition. */
+  #pane { position: relative; }
+
   /* Scrollbars discrètes */
   #viewport::-webkit-scrollbar, .thin-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
   #viewport::-webkit-scrollbar-thumb, .thin-scroll::-webkit-scrollbar-thumb {

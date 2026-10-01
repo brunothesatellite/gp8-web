@@ -185,11 +185,21 @@
        (desktop) ou de la hauteur (mobile) — aucun recouvrement possible. -->
   <div id="stage" class="order-1 md:order-2 flex min-h-0 flex-1 flex-col md:flex-row">
 
+    <!-- #pane = cellule NON défilante : c'est ELLE qui porte les overlays.
+         #loader / #emptyState ne doivent surtout pas être enfants de #viewport :
+         #viewport défile (overflow-auto) et un enfant `absolute inset-0` s'y
+         ancre à l'ORIGINE DU CONTENU et non à la zone visible. Sur une
+         partition très large (layout Horizontal) le calque restait donc épinglé
+         en haut, « flottait » sur le côté et disparaissait au scroll au lieu
+         de recouvrir la feuille → impression de couche résiduelle. -->
+    <div id="pane" class="relative flex min-h-0 min-w-0 flex-1 flex-col">
+
     <!-- conteneur alphaTab : DOIT rester dans le flux (jamais display:none),
          sinon alphaTab mesure une largeur de 0 au render. -->
-    <main id="viewport" class="relative min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
+    <main id="viewport" class="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
 
     <div id="scoreArea" class="alphaTab min-h-full w-full" style="background:var(--sheet)"></div>
+    </main>
 
     <!-- état vide : overlay opaque posé AU-DESSUS de la feuille -->
     <div id="emptyState"
@@ -234,7 +244,7 @@
         <span id="loaderText">Analyse du fichier…</span>
       </div>
     </div>
-  </main>
+  </div><!-- /#pane -->
 
     <!-- =========================================================
          MÉLANGEUR — intégré au FLEX de #stage : il redimensionne

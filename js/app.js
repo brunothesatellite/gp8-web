@@ -454,11 +454,95 @@
     }
 
     /* -------- Initialisation alphaTab -------- */
+    /* ======== TRACE DE CHARGEMENT (diagnostic) =====================
+       `renderFinished` peut ne JAMAIS arriver sans qu'aucune erreur ne
+       soit levée : le layout d'une grande partition est asynchrone
+       (worker) et alphaTab ne prévient pas entre le moment où il reçoit
+       la partition et celui où il a fini d'agencer la dernière mesure.
+       Ces lignes horodatées (t0 = appel de loadFile) montrent OU le
+       chargement s'arrête :
+         +at scoreLoaded        → analyse du .gp terminée
+         +at midiLoaded         → génération MIDI terminée
+         +at preRender          → le worker a reçu l'ordre d'agencer
+         +at partialLayout #n   → n systèmes agencés (la progression)
+         +at renderFinished     → agencement complet
+       Sans `preRender` : le message n'est jamais parti (largeur 0).
+       Avec `preRender` mais sans suite : le layout est le coût réel.   */
+    function trace(label, extra) {
+      const t = S.perf ? Math.round(performance.now() - S.perf.t0) : Math.round(performance.now());
+      console.log(`[at +${t}ms] ${label}${extra ? ' · ' + extra : ''}`);
+    }
+    let nLayout = 0, nPaint = 0;
+
+    /* ================ CORRECTIF VENDOR (alphaTab 1.8.4) =============
+       Le bundle CDN contient, dans `AlphaSynthWebWorkerApi` (l.33576) :
+
+           get loadedMidiInfo() { return this.loadedMidiInfo; }
+
+       …le getter s'APPELLE LUI-MÊME → `RangeError: Maximum call stack size
+       exceeded`. Et comme `EventEmitterOfT.on()` évalue son fournisseur AU
+       MOMENT DE L'ENREGISTREMENT (l.24729), la simple ligne
+       `api.midiLoaded.on(…)` faisait exploser `wireEvents()` en son milieu :
+       tout ce qui venait après — `error`, `renderFinished`,
+       `postRenderFinished`, `partialLayout`, position, mesure, état — n'était
+       JAMAIS branché. Le rendu alphaTab, lui, était parfait : d'où une
+       partition peinte et un loader qui ne se levait JAMAIS, quel que soit le
+       temps d'agencement.
+
+       On répare le getter exactement comme la classe saine d'alphaTab
+       (`return this._loadedMidiInfo`, l.39852), y compris si l'instance du
+       synthé n'existe pas encore au démarrage (on s'intercale alors sur son
+       affectation). Sans jamais lever d'exception : échec → on continue.     */
+    function patchVendorMidiInfo(player) {
+      if (!player) return;
+      const fix = (obj) => {
+        if (!obj) return;
+        const proto = Object.getPrototypeOf(obj);
+        const d = Object.getOwnPropertyDescriptor(proto, 'loadedMidiInfo');
+        if (!d || typeof d.get !== 'function') return;
+        // On ne touche qu'au getter auto-récursif, pas à celui déjà sain.
+        if (Function.prototype.toString.call(d.get).indexOf('return this.loadedMidiInfo;') === -1) return;
+        Object.defineProperty(proto, 'loadedMidiInfo', {
+          configurable: true,
+          enumerable: d.enumerable,
+          get() { return this._loadedMidiInfo; }
+        });
+        console.log('[vendor] getter `loadedMidiInfo` réparé (auto-récursion supprimée)');
+      };
+
+      try {
+        let inst = player._instance;
+        fix(inst);
+        // `_instance` est un champ de classe (configurable) : on le remplace
+        // par un accesseur qui répare le futur synthé dès qu'il est créé.
+        Object.defineProperty(player, '_instance', {
+          configurable: true,
+          enumerable: true,
+          get() { return inst; },
+          set(v) { inst = v; fix(v); }
+        });
+      } catch (e) {
+        console.warn('[vendor] réparation de loadedMidiInfo impossible', e);
+      }
+    }
+
     function init(container) {
       createMix();                   // modèle de mixage vide, dispo tout de suite
       S.api = new alphaTab.AlphaTabApi(container, CFG.alphatab);
+      /* `api.player` renvoie NULL tant que `_player.instance` n'est pas prêt
+         (l.46264) : on cible l'objet interne `api._player`, le
+         `AlphaSynthWrapper` qui porte réellement `_instance`. */
+      patchVendorMidiInfo(S.api._player || S.api.player);
       wireEvents();
       return S.api;
+    }
+
+    /* Chaque enregistrement passe par là : si un fournisseur vendor lève au
+       moment de l'enregistrement, on l'isole. `EventEmitterOfT.on()` pousse
+       l'écouteur AVANT d'évaluer le fournisseur, donc l'événement reste
+       branché même quand l'évaluation échoue. */
+    function reg(fn) {
+      try { fn(); } catch (e) { console.error('[at] enregistrement impossible', e); }
     }
 
     function wireEvents() {
@@ -467,6 +551,8 @@
       api.scoreLoaded.on(score => safe(() => {
         const t0 = performance.now();
         if (S.perf) S.perf.scoreLoaded = Math.round(performance.now() - S.perf.t0);
+        nLayout = 0; nPaint = 0;
+        trace('scoreLoaded', `${score.tracks.length} pistes · ${score.masterBars.length} mesures`);
         S.score = score;
         createMix();                 // un modèle neuf pour ce score
         MixSync.suspend();
@@ -490,12 +576,9 @@
       /* `loadMidiFile()` recrée l'état des canaux côté worker : on repasse le
          modèle juste après (le moteur ne retient ni mute ni volume par piste).
          NB : `readyForPlayback` (déclenché APRÈS `midiLoaded`) réécrit TOUS
-         les volumes à `playbackInfo.volume / 16` — d'où le 2ᵉ réflexe ci-dessous,
-         sinon nos faders sont écrasés à chaque chargement. */
-      api.midiLoaded.on(() => safe(applyMix)());
-      if (api.player && api.player.readyForPlayback) {
-        api.player.readyForPlayback.on(() => safe(applyMix)());
-      }
+         les volumes à `playbackInfo.volume / 16` — d'où le 2ᵉ réflexe.
+         ⚠ Enregistrés plus BAS, une fois le rendu branché : chez alphaTab
+         1.8.4 leur fournisseur lit le getter `loadedMidiInfo` défectueux. */
 
       api.error.on(err => safe(() => {
         console.error('[alphaTab]', err);
@@ -503,12 +586,56 @@
         App.loader(false);
       })());
 
-      // `renderFinished` = un rendu partiel ; `postRenderFinished` = rendu complet
-      // (c'est lui qu'on attend pour révéler la partition).
-      // `renderFinished` = un rendu partiel (le score DEVIENT visible) ;
-      // `postRenderFinished` = rendu complet.
-      api.renderFinished.on(() => safe(() => { App.loader(false); markPaint(); })());
-      api.postRenderFinished.on(() => safe(() => { App.loader(false); markRender(); })());
+      // `renderFinished` = layout+agencement terminés ; `postRenderFinished`
+      // = gestionnaires suivants exécutés.
+      api.renderFinished.on(e => safe(() => {
+        trace('renderFinished', `${e.totalWidth}×${e.totalHeight}px · ${nLayout} partial(s) layouté(s)`);
+        App.loader(false); markPaint();
+      })());
+      api.postRenderFinished.on(() => safe(() => { trace('postRenderFinished'); App.loader(false); markRender(); })());
+
+      /* ---- Révélation PROGRESSIVE + sonde de layout ----
+         `enableLazyLoading` est VRAI par défaut : alphaTab ne peint que les
+         portions visibles. `renderFinished` n'attend donc que la FIN DU
+         LAYOUT, qui est le vrai coût sur une grande partition multi-pistes.
+         On se branche sur les événements bas niveau de `api.renderer` pour
+         (a) reveals la feuille dès la première portion peinte — le loader ne
+         peut plus jamais masquer une partition déjà lisible — et (b) compter
+         les partials : si le compteur monte, le layout AVANCE (c'est long,
+         pas bloqué) ; s'il reste à 0, le worker n'a rien reçu. */
+      const rd = api.renderer;
+      if (rd && rd.partialLayoutFinished) {
+        rd.partialLayoutFinished.on(() => safe(() => {
+          nLayout++;
+          if (nLayout === 1 || nLayout % 25 === 0) trace(`partialLayout #${nLayout}`);
+          App.loader(false); markPaint();        // du contenu est posé → on révèle
+        })());
+      }
+      if (rd && rd.partialRenderFinished) {
+        rd.partialRenderFinished.on(() => safe(() => {
+          nPaint++;
+          if (nPaint === 1) trace(`partialRender #1 (1ʳᵉ portion peinte)`);
+          App.loader(false); markPaint();
+        })());
+      }
+      console.log('[init] hooks renderer :',
+        !rd ? 'api.renderer ABSENT'
+            : `partialLayout=${!!rd.partialLayoutFinished} partialRender=${!!rd.partialRenderFinished} preRender=${!!rd.preRender}`);
+      if (rd && rd.preRender) {
+        rd.preRender.on(resize => safe(() => trace('preRender', resize ? 'resize (re-layout complet relancé !)' : 'nouveau rendu')));
+      }
+
+      /* --- mixage : on repasse le modèle dès que les canaux existent.
+             Enregistrés en DERNIER et isolés par `reg()` : ce sont eux qui,
+             chez alphaTab 1.8.4, lisent le getter vendor défectueux.
+             ⚠ `api.player` vaut NULL au démarrage (getter conditionné à
+             `_player.instance`) : on s'adresse au wrapper `api._player`,
+             qui expose `readyForPlayback` quel que soit l'état du synthé.  */
+      reg(() => api.midiLoaded.on(() => safe(() => { trace('midiLoaded'); applyMix(); })()));
+      const wrapper = api._player || api.player;
+      if (wrapper && wrapper.readyForPlayback) {
+        reg(() => wrapper.readyForPlayback.on(() => safe(() => { trace('readyForPlayback'); applyMix(); })()));
+      }
 
       /* --- position / progression + calage de l'audio (mode Mix) --- */
       api.playerPositionChanged.on(e => safe(() => {
@@ -723,6 +850,22 @@
       );
     }
 
+    /* Synthèse forcée, pour le garde-fou : ce qui MANQUE fait partie du
+       diagnostic (un `rendered` indéfini == le worker n'a jamais fini).
+       Retourne une phrase courte réutilisable dans un toast. */
+    function flushPerf() {
+      const p = S.perf;
+      if (!p) return 'aucun chargement suivi';
+      const msg =
+        `scoreLoaded +${p.scoreLoaded ?? '—'} ms · layout ${nLayout} partial(s), ` +
+        `${nPaint} peint(es) · agencement complet ${p.rendered === undefined ? 'JAMAIS terminé' : '+' + p.rendered + ' ms'}`;
+      if (!p.reported) {
+        p.reported = true;
+        console.warn(`[perf] « ${p.name} » INCOMPLET → ${msg}`);
+      }
+      return msg;
+    }
+
     /* Applique le modèle complet en une passe. Idempotent.
        Les appels alphaTab sont GROUPÉS : `changeTrackMute` refait un passage
        complet des tracks à chaque appel (parseTracks → _trackIndexesToTracks),
@@ -892,7 +1035,8 @@
       showTrack, toggleDisplay, toggleTrackMute, toggleTrackSolo, setTrackVolume,
       toggleAudioMute, toggleAudioSolo, resetMix, applyMix,
       toggleLoop, setLoopRange, clearLoopRange,
-      setLayout, setScrollMode, setSpeed, applyVolumes, isSynthMode
+      setLayout, setScrollMode, setSpeed, applyVolumes, isSynthMode,
+      flushPerf
     };
   })();
 
@@ -929,10 +1073,13 @@
       if (loaderTmr) { clearTimeout(loaderTmr); loaderTmr = null; }
     }
 
-    /* Garde-fou : alphaTab ne déclenche `renderFinished` que si le rendu a
-       réellement lieu. Or il diffère TANT QUE les polices (Bravura) ne sont pas
-       chargées → un simple 404 sur fontDirectory laisse le loader bloqué à vie.
-       On laisse 12 s, puis on relève et on diagnostique. */
+    /* Garde-fou. Depuis que le loader se relève dès la PREMIÈRE portion peinte
+       (`renderer.partialRenderFinished`), le voir encore posé après 12 s ne
+       veut plus dire « rendu lent » mais « rien n'a été peint » : soit les
+       polices (Bravura) n'arrivent pas (404 sur fontDirectory), soit
+       alphaTab a sauté le rendu (`renderer.width === 0` → conteneur mesuré
+       à 0, donc masqué/hors flux). On le diagnostique plutot qu'on ne
+       l'affirme. */
     function armLoaderWatchdog(label) {
       if (loaderTmr) clearTimeout(loaderTmr);
       loaderTmr = setTimeout(() => {
@@ -941,10 +1088,17 @@
         loaderOn = false;
         $('#loader').classList.add('hidden');
         const api = Player.S.api;
-        const fontsOk = !!(api && api.uiFacade && api.uiFacade.canRender);
-        toast(fontsOk
-          ? `Rendu anormalement lent (${label}).`
-          : 'Polices de notation (Bravura) introuvables → rendu bloqué. Vérifiez core.fontDirectory (slash final) et le CDN.',
+        const fontsOk  = !!(api && api.uiFacade && api.uiFacade.canRender);
+        const atWidth  = api && api.renderer ? api.renderer.width : -1;
+        const domWidth = $('#scoreArea').offsetWidth;
+        console.warn('[watchdog]', { label, fontsOk, atWidth, domWidth });
+        const summary = Player.flushPerf();   // ce qui est fait / ce qui manque
+        toast(
+          !fontsOk
+            ? 'Polices de notation (Bravura) introuvables → rendu bloqué. Vérifiez core.fontDirectory (slash final) et le CDN.'
+            : (atWidth === 0 || domWidth === 0
+                ? `Rendu sauté : conteneur mesuré à ${domWidth}px × ${atWidth}px (élément masqué ?)`
+                : `Chargement jamais terminé (${label}) — ${summary}. Détail en console.`),
           'error');
       }, 12000);
     }
@@ -1368,8 +1522,17 @@
       CFG.alphatab.display.layoutMode = layoutId(defaultLayout);
       $('#layoutSelect').value = defaultLayout;
 
-      Player.init($('#scoreArea'));
-      applyResponsiveLayout();
+      /* Rien ne doit tuer `boot()` en silence : une exception ici coupeait
+         `applyResponsiveLayout()` ET l'affichage du diagnostic — l'interface
+         « marchait » (DnD déjà câblé plus haut) alors que le moteur était à
+         moitié initialisé. */
+      try {
+        Player.init($('#scoreArea'));
+        applyResponsiveLayout();
+      } catch (e) {
+        console.error('[boot] échec de l’initialisation du moteur', e);
+        toast('Échec du démarrage alphaTab : ' + (e && e.message ? e.message : e), 'error');
+      }
 
       console.log('%cGP8 Player%c alphaTab ' + (alphaTab.meta && alphaTab.meta.version || '1.8.4'),
         'background:#0ea5e9;color:#fff;padding:2px 6px;border-radius:4px;font-weight:bold', 'color:#64748b');
