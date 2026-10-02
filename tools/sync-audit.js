@@ -300,10 +300,35 @@ function fixEmptyAnacrusis(score) {
   return true;
 }
 
+/* MIROIR de player.js fixAlternateEndings — alternate endings (volta). */
+function fixAlternateEndings(score) {
+  const mbs = score && score.masterBars;
+  if (!mbs || !mbs.length) return false;
+  const endNum = mask => { let n = 0; for (let b = 0; b < 16; b++) if (mask & (1 << b)) n = b + 1; return n; };
+  let changed = false;
+  for (let i = 0; i < mbs.length; i++) {
+    const mb = mbs[i];
+    if (!mb.isRepeatEnd || !mb.alternateEndings) continue;
+    const closings = (mb.repeatGroup && mb.repeatGroup.closings) || [mb];
+    if (closings.length > 1) {
+      if (mb.repeatCount > 1) { mb.repeatCount = 1; changed = true; }
+    } else {
+      let maxEnd = endNum(mb.alternateEndings);
+      for (let j = i + 1; j < mbs.length && mbs[j].alternateEndings; j++) {
+        const n = endNum(mbs[j].alternateEndings);
+        if (n > maxEnd) maxEnd = n;
+      }
+      if (maxEnd > mb.repeatCount) { mb.repeatCount = maxEnd; changed = true; }
+    }
+  }
+  return changed;
+}
+
 function runOne(at, gpPath) {
   const bytes = new Uint8Array(fs.readFileSync(gpPath));
   const score = at.importer.ScoreLoader.loadScoreFromBytes(bytes, new at.Settings());
   fixEmptyAnacrusis(score);            // MIROIR de player.js (mesures vides/pickup)
+  fixAlternateEndings(score);          // MIROIR de player.js (fins alternées)
   const gen   = at.midi.MidiFileGenerator.generateSyncPoints(score) || [];
   const raw   = gen.filter(p => p && isFinite(p.synthTime) && isFinite(p.syncTime))
                    .map(p => ({ t: p.synthTime, a: p.syncTime }))

@@ -597,13 +597,23 @@ répétitions simples (sans volta) où `repeatCount` = nombre de passages.
 
 Une fois 12.1 corrigé, traiter le **résidu** : les fichiers où alphaTab et GP
 divergent encore sur les occurrences de mesures (malgré un développement correct).
-Concerne surtout **ACDC** (64/80 points), **Renaud** (113/156), **Iron Maiden**
-(135/136).
+Concerne surtout **ACDC** (64/80 points), **Renaud** (65/156), **Iron Maiden** (124/136).
 
 **Correctif (§9.6)** : reconstruire le mapping `(mesure, occurrence) → FrameOffset`
 **depuis l'ordre chronologique des `FrameOffset`** (lui strictement cohérent) au lieu
 de se fier à l'appariement `(BarIndex, BarOccurrence)` d'alphaTab. → le saut (déjà
 propre grâce à la Phase 1) atterrit alors sur la **bonne** occurrence.
+
+> **⚠ Tenté et retiré (2026-10-02).** L'implémentation naive (réassigner
+> `barOccurence = k` pour le k-ème point trié par `FrameOffset`, sur toute mesure
+> à ≥2 points) **régresse** : NEW 43 → 199 recadrages, glitchs 18 → 46. Cause :
+> elle casse les appariements **déjà corrects** (une mesure peut porter plusieurs
+> points pour une même occurrence, et l'ordre des FrameOffset ≠ toujours l'ordre
+> des passages). Le correctif a été retiré (voir `fixAlternateEndings` seul, qui
+> reste actif et validé). Ré-implémenter §9.6 demande d'être **sélectif** :
+> ne réassigner que les points dont `barOccurence` ne correspond à aucun passage
+> réel, en préservant les appariements déjà justes — et probablement de ne le faire
+> qu'une fois la couche 12.1 stabilisée sur tous les cas.
 
 **Limite** : §9.6 corrige la couche « appariement ». Si alphaTab développe encore
 les répétitions un nombre de fois différent de l'enregistrement (couche 2), un saut

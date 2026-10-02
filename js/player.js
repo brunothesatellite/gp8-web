@@ -212,6 +212,7 @@
         trace('scoreLoaded', `${score.tracks.length} pistes · ${score.masterBars.length} mesures`);
         S.score = score;
         fixEmptyAnacrusis(score);       // mesures vides/pickup remises sur la timeline
+        fixAlternateEndings(score);     // fins alternées : nombre de passages correct
         createMix();                 // un modèle neuf pour ce score
         MixSync.suspend();
         App.onScoreLoaded(score);    // DOM du tiroir (léger)
@@ -555,6 +556,39 @@
         mbs[i].start = mbs[i - 1].start + mbs[i - 1].calculateDuration();
       }
       return true;
+    }
+
+    /* ---- Correctif BUGMP3 : alternate endings (volta) mal développées ----
+       alphaTab pilote le nombre de passages d'une répétition par `repeatCount`,
+       alors qu'un groupe à fins alternées en exige autant que de fins. Deux cas :
+         · une fin de répétition porte PLUSIEURS fins (masque de bits, ex. Blink
+           `alt=7` = fins 1-2-3, + une barre de fin 4) → autant de passages que la
+           fin la plus haute ;
+         · les fins alternées sont réparties sur PLUSIEURS fins de répétition
+           (ex. Renaud #17/18/19 = fins 1,2,3) → chaque fin est jouée UNE fois.
+       Sans quoi le groupe est joué trop (ou trop peu) de fois, le compteur
+       d'occurrences diverge et les points de synchro sont mal appariés. */
+    function fixAlternateEndings(score) {
+      const mbs = score && score.masterBars;
+      if (!mbs || !mbs.length) return false;
+      const endNum = mask => { let n = 0; for (let b = 0; b < 16; b++) if (mask & (1 << b)) n = b + 1; return n; };
+      let changed = false;
+      for (let i = 0; i < mbs.length; i++) {
+        const mb = mbs[i];
+        if (!mb.isRepeatEnd || !mb.alternateEndings) continue;
+        const closings = (mb.repeatGroup && mb.repeatGroup.closings) || [mb];
+        if (closings.length > 1) {
+          if (mb.repeatCount > 1) { mb.repeatCount = 1; changed = true; }
+        } else {
+          let maxEnd = endNum(mb.alternateEndings);
+          for (let j = i + 1; j < mbs.length && mbs[j].alternateEndings; j++) {
+            const n = endNum(mbs[j].alternateEndings);
+            if (n > maxEnd) maxEnd = n;
+          }
+          if (maxEnd > mb.repeatCount) { mb.repeatCount = maxEnd; changed = true; }
+        }
+      }
+      return changed;
     }
 
     /* Remplit le modèle avec les niveaux d'origine SANS toucher aux canaux
