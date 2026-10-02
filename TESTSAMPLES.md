@@ -1,17 +1,18 @@
 # ACDC (1979 - Highway to Hell) - Highway to Hell.gp
-*CHECK* Renvois incorrects MP3 dans ACDC : toujours complétement faux : mesures 6-7-8-9-10 l'audio est faux alors que la séquence midi est correct : 6-8-7-9 6-7-8-9-10
+renvoi sembgle correct !!!!
+Audio ok
 
 # Blink 182 (1999 - Enema Of The State) - All the Small Things v2.gp
-*CHECK* Régression tempo sur Blink-182 à vérifier ou alors artefacts sonores à investiguer.
+ça semble OK
 
 # Europe (1986 - The Final Countdown) - The Final Countdown v3.gp
 
 
 # F-Zero X (1998) - Goal BGM.gp
-
+OK
 
 # Helloween (1988 - Keeper of the Seven Keys - Part II) - Dr. Stein.gp
- *CHECK* Le problème de vitesse de l'audio est toujours présent : le fix 47014c0701aa45b40b5ddc9dc1c27371028b79e2 a bien corrigé Iron Maiden, mais introduit des régressions, avec des vitesses variables en particulier sur Dr. Stein qui était correct en 10571f1db054d79a0ece98d5facd49fb47716314
+ Qualité mp3 ok et vitesse ok
 
 # Igorrr (2025 - Amen) - Blastbeat Falafel.gp
 
@@ -20,16 +21,16 @@
 
 
 # Iron Maiden (1992 - Fear of the Dark) - Fear of the Dark.gp
-
+PAs si mal, l'audio sur la séquence "3" qui ralentit est mieux 
 
 # Led Zeppelin (1970 - Led Zeppelin III) - Immigrant Song.gp
 
 
 # Metallica (1984 - Ride the Lightning) - For Whom the Bell Tolls v4.gp
-
+OK au moins jusqu'au chant, à vérifier en entier
 
 # Renaud (1983 - Morgane de toi) - Morgane de toi (amoureux de toi).gp
-*CHECK* Renvois midi incorrects dans Renaud : le début doit être 1 2 3 4 1 2 3 5 1 2 3 6
+Renvois et MP3 ok
 
 # Sepultura (1993 - Chaos A.D.) - Amen.gp
 
