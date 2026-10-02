@@ -553,11 +553,46 @@ reconstruire les occurrences depuis l'ordre des `FrameOffset` — à faire si be
 * `node tools/load-smoke.js` : chargement + bindings.
 * alphaTab 1.8.4 est téléchargé une fois dans `tools/vendor/` (ignoré par git).
 
+### 11.1 Correctifs complémentaires (postérieurs à §11)
+
+Ajoutés après la première passe, dans `js/player.js` + `js/mix-sync.js` :
+
+6. **Audio natif (grésillement + « au ralenti »)** — le rate piloté sur la pente
+   faisait tourner le mp3 à 0,818× (time-stretch = grésillement + sensation de
+   ralenti). Corrigé comme GP : le **MIDI** joue au `ModifiedTempo` (via
+   `tempoScale = ModifiedTempo/OriginalTempo`, `applySpeed()`), le mp3 reste à
+   **≈ 1,0× natif**. → plus de ralenti, plus de time-stretch.
+7. **`fixEmptyAnacrusis`** (`player.js`, dans `scoreLoaded`) — un « anacrusis »
+   (mesure avant la n°1) est réduit à **0 tick** par alphaTab → la mesure (et son
+   audio) est escamotée et la durée raccourcie. On la remet en mesure normale
+   (durée complète + `start` recalculés). Ex. Dr. Stein `#0`.
+8. **`fixAlternateEndings`** (`player.js`, dans `scoreLoaded`) — nombre de passages
+   des fins alternées (voir §12.1). Blink 182 : `#8.repeatCount` 2 → **4**.
+
+**Audit à jour** (14 fichiers, `fixEmptyAnacrusis` + `fixAlternateEndings` actifs) :
+
+| métrique | LEGACY | NEW |
+|---|---:|---:|
+| recadrages durs | 671 | **43** |
+| dont retours arrière | 329 | **8** |
+| **dont GLITCHS (le vrai saccade)** | **472** | **18** |
+
+* **Dr. Stein** : 1 seek, 0 retour, 0 glitch — grésillement/ralenti disparus.
+* **Blink 182** : 4 passages volta corrects (`6-7-8-9 ×3` puis `6-7-8-10`).
+
+**Note durée** (webapp ≈ 4:27 vs GP 4:36) : écart lié aux mesures vides/pickup
+(`fixEmptyAnacrusis` en récupère une partie) et à l'approximation `tempoScale`
+**constant** vs le `ModifiedTempo` **variable** de GP (§12.2).
+
 ---
 
 ## 12. Reste à faire — 2 bugs identifiés (dans l'ordre d'attaque)
 
-### 12.1 Bug des alternate endings (volta) — **cause racine de P3**
+> **État** : 12.1 **corrigé** (voir §11.1-8). 12.2 **tenté puis retiré** (régresse) —
+> à ré-implémenter proprement. Le reste du texte est conservé comme documentation
+> de diagnostic.
+
+### 12.1 Bug des alternate endings (volta) — **cause racine de P3** — ✅ CORRIGÉ
 
 **Symptôme** (Blink 182 – All the Small Things) : les renvois multiples (fins
 1‑2‑3 puis 4) sont mal développés. Attendu `6-7-8-9 6-7-8-9 6-7-8-9 6-7-8-10`,
@@ -588,10 +623,19 @@ diverger le compteur `(BarIndex, BarOccurrence)` d'alphaTab vs GP → les points
 synchro sont mal appariés → symptôme P3. Corriger le développement des fins
 alternées doit **aussi** faire retomber une bonne partie de P3.
 
-**Correctif à envisager** : dans `_moveNextWithNormalRepeats`, quand le groupe a
-des alternate endings, le nombre de passages doit être dicté par le **numéro de
-fin maximum** (ici 4), pas par `repeatCount` (2). Attention à ne pas casser les
-répétitions simples (sans volta) où `repeatCount` = nombre de passages.
+**Correctif appliqué** — `fixAlternateEndings(score)` dans `player.js`
+(appelé dans `scoreLoaded` avant génération MIDI + pont de synchro). Il branche sur
+**deux structures distinctes** :
+
+* une fin de répétition portant un **masque** de fins (ex. Blink `#8 alt=7` = fins
+  1‑2‑3, + une barre de fin 4) → `repeatCount = numéro de fin max` (4) ;
+* fins alternées réparties sur **plusieurs** fins de répétition (ex. Renaud
+  `#17/18/19` = fins 1,2,3) → `repeatCount = 1` (chaque fin jouée **une** fois).
+
+Validé : Blink `#8.repeatCount` **2 → 4** → passages `6-7-8-9 ×3` puis `6-7-8-10`
+corrects. Renaud/Iron Maiden non sur-développés. **Attention** : ne pas casser les
+répétitions simples (sans volta), où `repeatCount` = nombre de passages (laissé
+intact par `fixAlternateEndings`, qui ne traite que les fins alternées).
 
 ### 12.2 P3 / §9.6 — reconstruction des occurrences (résidu)
 
@@ -620,5 +664,7 @@ les répétitions un nombre de fois différent de l'enregistrement (couche 2), u
 résiduel peut subsister → à remonter en amont (alphaTab) si besoin.
 
 ### Ordre d'attaque
-1. **12.1** (alternate endings) — cause racine, corrige le MIDI *et* une partie de P3.
-2. **12.2** (§9.6) — pour le résidu que 12.1 ne couvre pas.
+1. ~~**12.1** (alternate endings)~~ — ✅ corrigé (§11.1-8).
+2. **12.2** (§9.6) — résidu restant ; à ré-implémenter **sélectivement** (ne
+   réassigner que les points réellement mal appariés), ou à remonter en amont
+   alphaTab pour la couche « nombre de passages ».
