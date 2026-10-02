@@ -200,6 +200,28 @@
     }
   }
 
+  /* Liste des pistes — le scroll est piloté par la hauteur d'écran, pas la
+     largeur (cf. RESPONSIVE.md P1 : un téléphone en paysage fait 915×412).
+     · Grand écran haut : seule la liste défile, en-tête/libellés/pied fixes.
+     · Téléphone (portrait ou paysage court ≤559px) : AUCUNE scrollbar interne ;
+       le tiroir entier devient le seul conteneur swipable (toutes les pistes
+       accessibles au pouce). `flex-grow` remplit si peu de pistes,
+       `flex-shrink:0` interdit l'écrasement → au-delà, c'est #drawer qui défile. */
+  #trackList{ flex:1 1 auto; min-height:0; overflow-y:auto; }
+  @media (max-width: 767.98px), (max-height: 559px){
+    #trackList{ flex:1 0 auto; min-height:auto; overflow:visible; }
+    #drawer{
+      -webkit-overflow-scrolling:touch;   /* défilement tactile fluide (Android) */
+      touch-action:pan-y;                 /* le glissement vertical est garanti */
+    }
+    /* L'en-tête « Mélangeur ✕ » reste accessible pendant le swipe : solidement
+       arrimé en haut du tiroir (fond opaque, sinon le contenu passe au travers). */
+    #drawer > :first-child{
+      position:sticky; top:0; z-index:2;
+      background:#0f172a;
+    }
+  }
+
   /* états affichés / mute / solo */
   .mx-btn{
     display:inline-flex; align-items:center; justify-content:center;

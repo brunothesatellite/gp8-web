@@ -3,7 +3,7 @@
 * Renvois incorrects MP3 dans ACDC à vérifier
 
 # MAJOR
-* **HIGH - LOW RISK** en mode paysage ou portrait sur android, garantir que l'on voit toutes les pistes dans le tiroir Melangeur de piste : supprimer le scrollbar sur la liste des pistes dans le tiroir au profit d'une tiroir Melange swipable verticalement dans son intégralité car parfois un voit à peine un bout de piste en mode horizontal.
+* N/A*
 
 # MINOR
 * N/A
