@@ -73,16 +73,35 @@
     const SLOPE_MIN  = 0.5;  // clamp de la pente locale → rate plancher
     const SLOPE_MAX  = 2.0;  // clamp de la pente locale → rate plafond
 
+    /* --- tempo par segment, corrigé « intégral » (BUGMP3 §13) ---------
+       Le MIDI suit l'enregistrement SEGMENT par SEGMENT (tempo variable de
+       GP) : playbackSpeed = userSpeed × (1/pente locale). L'audio reste à
+       ~1,0× natif partout. Pour que le pont soit indexé sur la VRAIE
+       position musicale quand la vitesse varie, on intègre l'horloge
+       musicale (∫ speed·dt) au lieu de supposer `timePosition × speed` —
+       cette identité ne vaut que si la vitesse est restée constante depuis
+       le dernier seek. Morceaux à tempo uniforme : chaque segment vaut la
+       constante actuelle → comportement inchangé sans branche spéciale. */
+    const TEMPO_EPS     = 0.04;  // hystérésis d'écriture de playbackSpeed (4 %)
+    const TEMPO_HOLD_MS = 300;   // intervalle minimal entre deux écritures
+    const ANCHOR_TOL_MS = 30;    // tolérance du détecteur de saut d'horloge
+
     let points  = [];      // [{ t, a, jump, slope, rawSlope }] trié par t
     let nJump   = 0;       // nb de segments de saut (discontinuités)
     let nOff    = 0;       // nb de segments à pente hors plage
     let avgSlope = 1;      // pente moyenne (tempo enreg. / partition)
-    let tempoScale = 1;    // 1/avgSlope = ModifiedTempo/OriginalTempo
+    let tempoScale = 1;    // 1/avgSlope = ModifiedTempo/OriginalTempo (moyenne, fallback + journal)
     let bias    = 0;       // décalage constant éventuel (calage manuel)
     let playing = false;
     let active  = false;
     let speed   = 1;
     let note    = '';
+
+    let userSpeed = 1;     // vitesse utilisateur (× tempo du segment courant)
+    let musMs   = 0;       // HORLOGE MUSICALE : ∫ playbackSpeed·dt — l'axe du pont
+    let musRef  = -1;      // dernier api.timePosition vu (détection de saut/seek)
+    let musWall = 0;       // dernier instant réel (performance.now) de l'horloge
+    let lastTempoWrite = 0;
 
     /* état de la boucle + instrumentations (rapportées toutes les STAT_MS) */
     let lastControl = 0, lastWrite = 0, lastMaster = -1;
@@ -117,6 +136,7 @@
           .map(p => ({ t: p.synthTime, a: p.syncTime }))
           .sort((x, y) => x.t - y.t);
         analyzeSegments();               // dédoublonne + détecte les sauts + pentes
+        musRef = -1; lastTempoWrite = 0; // nouvelle table → horloge ré-ancrée
         note = points.length
           ? points.length + ' point(s) de synchro'
             + (nJump ? ' · ' + nJump + ' saut(s)' : '')
@@ -171,6 +191,12 @@
         if (!points[i].jump) continue;
         points[i].slope = (i + 1 < n) ? points[i + 1].slope : 1;
       }
+      // 4. TEMPO du segment (correctif intégral §13) : playbackSpeed local =
+      //    1/pente — la pente étant déjà clampée [SLOPE_MIN, SLOPE_MAX], la
+      //    vitesse MIDI reste mécaniquement dans [0,5 ; 2] (tempo GP). Un
+      //    morceau à pente uniforme donne une vitesse uniforme : même valeur
+      //    qu'aujourd'hui, sans branche spéciale.
+      for (const p of points) p.speed = p.slope > 0 ? 1 / p.slope : 1;
 
       // Pente MOYENNE = tempo relatif enregistrement / partition (hors sauts).
       // tempoScale = 1/penteMoy = ModifiedTempo/OriginalTempo : c'est le facteur
@@ -255,26 +281,100 @@
       return points[lo].slope;
     }
 
+    /* tempo (vitesse MIDI) du segment contenant t — miroir de slopeAt. */
+    function speedAt(t) {
+      const n = points.length;
+      if (n < 2) return 1;
+      if (t <= points[0].t) return points[0].speed;
+      if (t >= points[n - 1].t) return points[n - 2].speed;
+      let lo = 0, hi = n - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (points[mid].t <= t) lo = mid; else hi = mid - 1;
+      }
+      return points[lo].speed;
+    }
+
+    /* ---- HORLOGE MUSICALE : ∫ playbackSpeed·dt ----
+       api.timePosition est une axe REEL (1 ms/ms de temps wall) qu'alphaTab
+       re-echelonne a chaque changement de vitesse (timePosition *= old/new) :
+       `timePosition × speed` ne confond l'axe musical QUE si la vitesse est
+       restee constante depuis le dernier seek. Des que le tempo varie par
+       segment, seule l'integrale est juste. On l'integre ici a la cadence des
+       evenements (~344/s : precision <1 ms entre deux frontieres) ; sur saut
+       detecte (seek, stop, boucle, re-echelonnement vendor) on RE-ANCRE plutôt
+       que d'integrer un trou : le re-echelonnement d'alphaTab conservant la
+       position musicale, l'ancre `real × sp` retrouve exactement musMs. */
+    function advanceMusicalClock(api, now) {
+      const real = api.timePosition || 0;
+      const sp = curSpeed();
+      if (musRef < 0) {                       // premiere passe / nouvelle table
+        musMs = real * sp; musRef = real; musWall = now;
+        return musMs;
+      }
+      let dw = now - musWall; if (dw < 0) dw = 0;
+      musMs += dw * sp;
+      // sur l'axe reel, timePosition avance de ~1 ms par ms wall ; un ecart
+      // superieur a la tolerance = repositionnement (seek/stop/boucle/rescale).
+      if (Math.abs(real - musRef - dw) > ANCHOR_TOL_MS + dw * 0.5) musMs = real * sp;
+      musRef = real; musWall = now;
+      return musMs;
+    }
+
+    /* ---- moteur de tempo (GP) : le MIDI suit l'enregistrement ----
+       playbackSpeed = userSpeed × speedAt(musMs). Hysteresis TEMPO_EPS +
+       throttle TEMPO_HOLD_MS : les segments contigus de tempo quasi egal ne
+       declenchent AUCUNE ecriture (morceaux uniformes : 0 changement, jamais),
+       et une vraie frontiere (intro 0,65x → riff 1,75x) en déclenche UNE. */
+    function applyTempo(api, now) {
+      if (!api) return;
+      const want = clamp(userSpeed * speedAt(musMs), 0.06, 16);
+      const cur = api.playbackSpeed > 0 ? api.playbackSpeed : 1;
+      if (Math.abs(want - cur) < TEMPO_EPS) return;
+      if (now - lastTempoWrite < TEMPO_HOLD_MS) return;
+      api.playbackSpeed = want;               // alphaTab re-echelonne la position
+      lastTempoWrite = now;
+    }
+
+    /* vitesse utilisateur : rentree dans le moteur de tempo, appliquee sans
+       throttle (geste humain). Sans pont (aucun point de synchro), simple
+       userSpeed — comportement d'avant, sans branche speciale. */
+    function setUserSpeed(v) {
+      userSpeed = v > 0 ? v : 1;
+      const api = Player.S.api;
+      if (!api) return;
+      if (points.length >= 2) {
+        advanceMusicalClock(api, performance.now());   // ancre si table neuve
+        lastTempoWrite = 0;
+        applyTempo(api, performance.now());
+        setRate(api.playbackSpeed > 0 ? api.playbackSpeed : userSpeed);
+      } else {
+        api.playbackSpeed = userSpeed;
+        setRate(userSpeed);
+      }
+    }
+
+    /* vitesse initiale du MIDI : userSpeed × tempo du 1er segment. */
+    function initialSpeed() {
+      return userSpeed * (points.length >= 2 ? speedAt(0) : 1);
+    }
+
     /* vitesse réellement appliquée par alphaTab (source de vérité) */
     function curSpeed() {
       const a = Player.S.api;
       return (a && a.playbackSpeed > 0) ? a.playbackSpeed : speed;
     }
 
-    /* pente locale courante du pont (da/dt) — facteur qui multiplie le rate
-       pour que l'audio suive le tempo noté au lieu de sécuer sur sa dérive. */
+    /* pente locale courante du pont (da/dt) — sur l'axe MUSICAL intégré. */
     function slopeNow() {
-      const api = Player.S.api;
-      if (!api) return 1;
-      return slopeAt(api.timePosition * curSpeed());
+      return slopeAt(musMs);
     }
 
     /* ---- cible (secondes) sur l'axe audio ---- */
     function targetSeconds() {
-      const api = Player.S.api;
-      if (!api) return null;
-      // alphaTab multiplie par playbackSpeed avant d'interpoler
-      const ms = audioMsFor(api.timePosition * curSpeed());
+      // axe musical intégré (∫ sp·dt) — plus `timePosition × speed`, qui ne
+      // vaut que si la vitesse est restée constante depuis le dernier seek.
+      const ms = audioMsFor(musMs);
       // On borne à 0 (et non null) : un syncTime négatif (ACDC: -1014 ms) ne
       // doit pas laisser la cible indéfinie et désactiver toute correction.
       return isFinite(ms) ? Math.max(0, ms) / 1000 : null;
@@ -291,6 +391,8 @@
     /* recalage immédiat (seek utilisateur, boucle A→B, changement de source) */
     function resync() {
       if (!active) return;
+      const api = Player.S.api;
+      if (api) { musMs = (api.timePosition || 0) * curSpeed(); musRef = -1; }
       seekTo(targetSeconds());
     }
 
@@ -326,12 +428,14 @@
 
     function correct() {
       if (!active || counting) return;
+      const api = Player.S.api;
       const a = el();
-      if (!a || !a.src) return;
-      const target = targetSeconds();
-      if (target == null) return;
+      if (!api || !a || !a.src) return;
 
       const now = performance.now();
+      advanceMusicalClock(api, now);           // axe MUSICAL du pont (∫ sp·dt)
+      const target = targetSeconds();
+      if (target == null) return;
 
       if (!playing) {                                // en pause : simple recadrage
         if (now - lastControl < CONTROL_MS) return;
@@ -345,6 +449,8 @@
       const dt = now - lastControl;
       lastControl = now;
 
+      applyTempo(api, now);   // tempo GP du segment courant (hystérésis + throttle)
+
       const drift = (a.currentTime - target) * 1000; // > 0 : l'audio est en avance
       if (Math.abs(drift) > peakDrift) peakDrift = Math.abs(drift);
 
@@ -357,8 +463,7 @@
          saccade »). Tant que le maître est à l'arrêt : aucune correction.
          Un maître qui recule (stop, aller à une mesure, boucle) n'est PAS un
          arrêt : on recale alors simplement la référence. */
-      const api = Player.S.api;
-      const master = api ? api.timePosition : 0;
+      const master = api.timePosition || 0;
       const dMaster = master - lastMaster;
       const stalled = lastMaster >= 0
         && master >= lastMaster
@@ -423,7 +528,7 @@
     }
 
     /* ---- cycle de vie ---- */
-    function start()   { active = true; playing = false; resetStats(); setRate(speed); }
+    function start()   { active = true; playing = false; resetStats(); musRef = -1; setRate(speed); }
     function stop()    {
       active = false; playing = false;
       const a = el();
@@ -458,8 +563,10 @@
     return {
       build, onPosition, onState, resync, setRate, setCountIn,
       start, stop, suspend,
+      setUserSpeed, initialSpeed,
       get active() { return active; },
-      get info()   { return { points: points.length, note: note, bias: bias }; },
+      get info()   { return { points: points.length, note: note, bias: bias,
+                              tempoScale: tempoScale, userSpeed: userSpeed }; },
       get tempoScale() { return tempoScale; }
     };
   })();

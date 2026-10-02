@@ -665,6 +665,83 @@ résiduel peut subsister → à remonter en amont (alphaTab) si besoin.
 
 ### Ordre d'attaque
 1. ~~**12.1** (alternate endings)~~ — ✅ corrigé (§11.1-8).
-2. **12.2** (§9.6) — résidu restant ; à ré-implémenter **sélectivement** (ne
+2. ~~**MAIDEN (§13)** — tempo variable par segment~~ — ✅ **corrigé** (correction
+   intégrale : horloge musicale ∫ + tempo par segment, voir §13).
+3. **12.2** (§9.6) — résidu restant ; à ré-implémenter **sélectivement** (ne
    réassigner que les points réellement mal appariés), ou à remonter en amont
    alphaTab pour la couche « nombre de passages ».
+
+---
+
+## 13. MAIDEN — tempo variable : le `tempoScale` CONSTANT est une impasse
+
+**Symptôme** (`BUG.md` CRITICAL) : *Fear of the Dark* — « le début est bien trop
+rapide par rapport à Guitar Pro », rythme variable.
+
+**Mesure** (2026-10-02, `tools/sync-audit.js` + relevé des pentes du pont,
+135 points de synchro, durée synthé 292 s) :
+
+| zone | pente locale (Δa/Δt) | vitesse MIDI que GP impose (1/pente) |
+|---|---|---|
+| intro 0–30 s | **1,53 → 1,58** | **0,63 – 0,65×** (plus LENT que la notation) |
+| riffs (segments longs, 121–251 s) | **0,56 → 0,58** | **1,72 – 1,79×** (plus RAPIDE) |
+| moyenne globale durée-pondérée | 0,854 | tempoScale actuel = **1,171 constant** |
+
+**Cause racine** — correctif §11.1-6 : `playbackSpeed = userSpeed × tempoScale`
+avec `tempoScale = 1/pente MOYENNE` **constant**. Valide sur un morceau à écart
+de tempo uniforme (Dr. Stein : pente 0,818 partout → 1,22× constant → parfait),
+**faux sur un morceau à tempo réellement variable** : l'écart enregistrement/
+partition de Maiden est **bimodal** (médiane 0,596, Q1 0,578, Q3 1,150). Aucun
+facteur constant ne peut satisfaire les deux zones : au début, la webapp joue à
+1,171 alors que GP joue à ~0,65 → **+80 % de vitesse au début** = le symptôme.
+
+> C'est la convergence naturelle avec la note du §11.1 (« remplacer le
+> tempoScale constant par le ModifiedTempo variable ») : GP fait exactement ça,
+> le tempo suit les points de synchro **par segment**.
+
+**Correctif — IMPLÉMENTÉ (2026-10-02) : correction INTÉGRALE, pas une verrue.**
+
+Le plan initial (écrire `speedAt(timePosition × speed)`) était lui-même faux dès
+que la vitesse varie : `timePosition × playbackSpeed` ne coïncide avec la
+position musicale QUE si la vitesse est restée constante depuis le dernier
+seek. La correction retenue supprime cette hypothèse pour TOUS les morceaux :
+
+1. **Horloge musicale intégrée** (`advanceMusicalClock`, `mix-sync.js`) :
+   `musMs += dt_wall × playbackSpeed` à la cadence des événements (~344/s,
+   précision <1 ms). C'est le VRAI axe du pont : `targetSeconds`/`slopeAt`/
+   `speedAt` sont indexés sur `musMs`, plus sur `timePosition × speed`.
+   Détection de saut (seek, stop, boucle, re-échelonnement vendor) →
+   RE-ANCRE `musMs = real × sp` plutôt qu'intégrer un trou ; l'identité
+   d'alphaTab (`timePosition = musicalMs / speed` aux frontières) la rend
+   exacte par construction, même après un seek avec une vitesse périmée.
+2. **Tempo par segment** (`analyzeSegments` : `p.speed = 1 / p.slope` ;
+   `applyTempo`) : `playbackSpeed = userSpeed × speedAt(musMs)`, écriture
+   seulement si |Δ| > `TEMPO_EPS (0,04)` et ≥ `TEMPO_HOLD_MS (300)` — un
+   morceau à pente uniforme ne déclenche donc AUCUN changement de vitesse
+   (cas général, pas de branche spéciale).
+3. **Audio natif partout, par construction** : `rate = sp × slopeAt(musMs) =
+   userSpeed × (1/slope) × slope = userSpeed` — le MP3 ne subit plus jamais
+   de time-stretch, uniforme ou variable.
+4. `player.js — applySpeed()` délègue : `MixSync.setUserSpeed(S.userSpeed)`
+   (le moteur de tempo vit dans MixSync ; sans points de synchro, repli
+   simple `userSpeed`).
+
+**Validation — `tools/sync-audit.js` (miroir à jour : `speedAt`, `st.sp`,
+horloge intégrée, colonne « écrit.tempo ») sur les 14 samples :**
+
+- TOTAUX NEW **inchangés vs la référence : 43 recadrages, 8 retours,
+  18 glitchs, burst max 2** → aucune régression sur les morceaux à pente
+  uniforme (Dr. Stein 1/0/0 comme avant, Europe 0/0/0, Immigrant Song 0/0/0).
+- **Iron Maiden : 239 recadrages LEGACY → 6 NEW** (dont 2 sauts voulus) et,
+  surtout, intro jouée à **0,645×** et riffs à **~1,75×** — le tempo GP par
+  segment, au lieu du 1,171× constant plaqué partout (= le « début trop
+  rapide »).
+- Écritures tempo : 399 sur l'ensemble (0 par construction sur le LEGACY ;
+  Dr. Stein n'en écrit que 23, aux ruptures de >4 % de sa rampe).
+- Effet bonus : la durée totale devient exactement celle de l'enregistrement
+  (∑ segments × pente = ∑ Δa) — résout en partie l'écart 4:27 vs 4:36.
+
+**À valider en navigateur** (feeling humain, non mesurable par le harness) :
+Maiden (intro lente correcte + transitions de tempo aux frontières, calée sur
+le GP), Dr. Stein (inchangé),blink/ACDC (volta + sauts), puis vitesse
+utilisateur ×0,5/×2 pendant la lecture (le moteur doit composer les deux).

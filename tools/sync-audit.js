@@ -39,6 +39,7 @@ const AT_URL  = 'https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.4/dist/alp
 const HOLD_MS = 400, SOFT_MS = 25, NUDGE = 0.10, GAIN = 2000;
 const CONTROL_MS = 250, DEADBAND_MS = 100, WRITE_MS = 1500, RATE_EPS = 0.03;
 const JUMP_SLOPE = 3.0, SLOPE_MIN = 0.5, SLOPE_MAX = 2.0;
+const TEMPO_EPS = 0.04, TEMPO_HOLD_MS = 300;   // §13 : tempo par segment
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -131,6 +132,8 @@ function analyzeSegments(points) {
     if (!points[i].jump) continue;
     points[i].slope = (i + 1 < n) ? points[i + 1].slope : 1;
   }
+  // MIROIR §13 : tempo du segment = 1/pente (clampée) — vitesse MIDI locale.
+  for (const p of points) p.speed = p.slope > 0 ? 1 / p.slope : 1;
   // pente moyenne → tempoScale = ModifiedTempo/OriginalTempo
   let sDa = 0, sDt = 0;
   for (let i = 0; i < n; i++) {
@@ -201,7 +204,24 @@ function makeBridge(rawPoints, mode) {
     return points[lo].slope;
   }
 
-  return { audioMs, targetSec, slopeAt, n: n0, nJump, nOff, tempoScale };
+  /* speedAt — MIROIR §13 : tempo (vitesse MIDI) du segment contenant t.
+     LEGACY : null (pas de moteur de tempo — vitesse constante 1×). */
+  function speedAt(t) {
+    const n = points.length;
+    if (n < 2) return 1;
+    if (t <= points[0].t) return points[0].speed;
+    if (t >= points[n - 1].t) return points[n - 2].speed;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (points[mid].t <= t) lo = mid; else hi = mid - 1;
+    }
+    return points[lo].speed;
+  }
+
+  return { audioMs, targetSec, slopeAt,
+           speedAt: mode === 'new' ? speedAt : null,
+           n: n0, nJump, nOff, tempoScale };
 }
 
 /* ====================== simulation pas à pas ======================= */
@@ -217,6 +237,8 @@ function maxBurst(times, win) {
 function simulate(bridge, lastT, dt, jumpAt) {
   const st = {
     now: 0, masterMs: 0, audioTime: 0, audioRate: 1,
+    sp: bridge.speedAt ? bridge.speedAt(0) : (bridge.tempoScale || 1),
+    lastTempo: -1e9, nTempo: 0,
     lastControl: -1e9, lastWrite: -1e9,
     peakDrift: 0, nSeek: 0, nBack: 0, nRate: 0,
     totalBackMs: 0, maxBackMs: 0, seekTimes: [],
@@ -226,11 +248,19 @@ function simulate(bridge, lastT, dt, jumpAt) {
 
   while (st.masterMs < lastT) {
     st.now += dt;
-    st.masterMs += dt * bridge.tempoScale;          // MIDI au modified tempo
+    st.masterMs += dt * st.sp;                      // HORLOGE MUSICALE ∫ sp·dt
     st.audioTime += st.audioRate * dt / 1000;
 
     if (st.now - st.lastControl < CONTROL_MS) continue;
     st.lastControl = st.now;
+
+    /* MIROIR §13 — moteur de tempo : userSpeed=1 dans la simulation. */
+    if (bridge.speedAt) {
+      const want = bridge.speedAt(st.masterMs);
+      if (Math.abs(want - st.sp) > TEMPO_EPS && st.now - st.lastTempo > TEMPO_HOLD_MS) {
+        st.sp = want; st.lastTempo = st.now; st.nTempo++;
+      }
+    }
 
     const target = bridge.targetSec(st.masterMs);
     if (target == null) continue;
@@ -241,7 +271,7 @@ function simulate(bridge, lastT, dt, jumpAt) {
     if (Math.abs(drift) > HOLD_MS) {
       const before = st.audioTime;
       st.audioTime = target;
-      st.audioRate = bridge.tempoScale * bridge.slopeAt(st.masterMs); // setRate NEW
+      st.audioRate = st.sp * bridge.slopeAt(st.masterMs); // setRate NEW
       st.nSeek++;
       // intentionnel si on traverse une discontinuité ; sinon = glitch (dérive)
       if (jumpAt && jumpAt(st.masterMs)) st.nJumpSeek++; else st.nGlitch++;
@@ -258,7 +288,7 @@ function simulate(bridge, lastT, dt, jumpAt) {
     if (st.now - st.lastWrite < WRITE_MS) continue;
 
     const slope = bridge.slopeAt(st.masterMs);
-    const r = Math.max(0.06, bridge.tempoScale * slope * (1 - clamp(drift / GAIN, -NUDGE, NUDGE)));
+    const r = Math.max(0.06, st.sp * slope * (1 - clamp(drift / GAIN, -NUDGE, NUDGE)));
     if (Math.abs(st.audioRate - r) > RATE_EPS) {
       st.audioRate = r; st.lastWrite = st.now; st.nRate++;
     }
@@ -267,7 +297,7 @@ function simulate(bridge, lastT, dt, jumpAt) {
   const minutes = lastT / 1000 / 60;
   return {
     n: bridge.n, nJump: bridge.nJump, nOff: bridge.nOff,
-    seeks: st.nSeek, back: st.nBack, rate: st.nRate,
+    seeks: st.nSeek, back: st.nBack, rate: st.nRate, tempo: st.nTempo,
     peak: Math.round(st.peakDrift), burst: maxBurst(st.seekTimes, 1500),
     maxBack: Math.round(st.maxBackMs), perMin: st.nSeek / minutes,
     jumpSeek: st.nJumpSeek, glitch: st.nGlitch
@@ -401,7 +431,7 @@ ensureAlphaTab(() => {
   }
 
   /* --- tableau --- */
-  const hdr = ['fichier', 'gen/brut', 'VARIANT', 'recad.', 'arrière', 'glitch', 'sauts', 'écrit.rate', 'burst', 'maxArr'];
+  const hdr = ['fichier', 'gen/brut', 'VARIANT', 'recad.', 'arrière', 'glitch', 'sauts', 'écrit.rate', 'écrit.tempo', 'burst', 'maxArr'];
   const lines = [];
   lines.push('| ' + hdr.join(' | ') + ' |');
   lines.push('|' + hdr.map(() => '---').join('|') + '|');
@@ -409,9 +439,9 @@ ensureAlphaTab(() => {
     const lost = (r.rawCount != null && r.gen < r.rawCount) ? ' ⚠' : '';
     const gp = r.gen + '/' + (r.rawCount == null ? '?' : r.rawCount) + lost;
     lines.push('| ' + [r.name, gp, 'LEGACY',
-      r.legacy.seeks, r.legacy.back, r.legacy.glitch, r.legacy.jumpSeek, r.legacy.rate, r.legacy.burst, r.legacy.maxBack].join(' | ') + ' |');
+      r.legacy.seeks, r.legacy.back, r.legacy.glitch, r.legacy.jumpSeek, r.legacy.rate, r.legacy.tempo, r.legacy.burst, r.legacy.maxBack].join(' | ') + ' |');
     lines.push('| ' + ['', '', 'NEW',
-      r.neu.seeks, r.neu.back, r.neu.glitch, r.neu.jumpSeek, r.neu.rate, r.neu.burst, r.neu.maxBack].join(' | ') + ' |');
+      r.neu.seeks, r.neu.back, r.neu.glitch, r.neu.jumpSeek, r.neu.rate, r.neu.tempo, r.neu.burst, r.neu.maxBack].join(' | ') + ' |');
   }
   console.log(lines.join('\n'));
 
@@ -427,18 +457,19 @@ ensureAlphaTab(() => {
 
   /* --- synthèse avant/après --- */
   console.log('');
-  let s = { lSeek: 0, nSeek: 0, lBack: 0, nBack: 0, lGlitch: 0, nGlitch: 0, lBurst: 0, nBurst: 0, nJumps: 0, nOff: 0 };
+  let s = { lSeek: 0, nSeek: 0, lBack: 0, nBack: 0, lGlitch: 0, nGlitch: 0, lBurst: 0, nBurst: 0, nJumps: 0, nOff: 0, nTempo: 0 };
   for (const r of rows) {
     s.lSeek += r.legacy.seeks; s.nSeek += r.neu.seeks;
     s.lBack += r.legacy.back;  s.nBack += r.neu.back;
     s.lGlitch += r.legacy.glitch; s.nGlitch += r.neu.glitch;
     s.lBurst = Math.max(s.lBurst, r.legacy.burst); s.nBurst = Math.max(s.nBurst, r.neu.burst);
-    s.nJumps += r.neu.nJump; s.nOff += r.neu.nOff;
+    s.nJumps += r.neu.nJump; s.nOff += r.neu.nOff; s.nTempo += r.neu.tempo;
   }
   console.log('recadrages durs (total) : LEGACY ' + s.lSeek + '  →  NEW ' + s.nSeek);
   console.log('  dont RETOURS arrière  : LEGACY ' + s.lBack + '  →  NEW ' + s.nBack);
   console.log('  dont GLITCHS (dérive) : LEGACY ' + s.lGlitch + '  →  NEW ' + s.nGlitch + '   ← le vrai « ça saccade »');
   console.log('  dont sauts (volontés) : ~1 par discontinuité (re-ancrage propre)');
+  console.log('écritures tempo (§13)   : ' + s.nTempo + ' (0 = morceaux à pente uniforme)');
   console.log('pire burst (1,5 s)      : LEGACY ' + s.lBurst + '  →  NEW ' + s.nBurst);
   console.log('sauts détectés (NEW)    : ' + s.nJumps + '  · pentes hors plage : ' + s.nOff);
   console.log('');

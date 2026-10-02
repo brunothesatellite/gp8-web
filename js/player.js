@@ -878,15 +878,13 @@
     }
     function setSpeed(pct) { S.userSpeed = pct > 0 ? pct : 1; applySpeed(); }
 
-    /* Le MIDI joue au MODIFIED tempo (comme GP) pour que le <audio> reste à
-       ~1,0× (natif — pas de ralenti ni de time-stretch). tempoScale =
-       ModifiedTempo/OriginalTempo (calculé par MixSync.build). La vitesse
-       utilisateur s'applique par-dessus. */
+    /* Tempo INTÉGRAL (BUGMP3 §13) : le MIDI suit l'enregistrement segment par
+       segment (tempo variable GP). Le moteur de tempo vit dans MixSync —
+       indexé sur son horloge musicale intégrée (∫ speed·dt), donc correct
+       aussi quand la vitesse change en cours de route. Sans audio embarqué ni
+       points de synchro, MixSync retombe sur le simple userSpeed. */
     function applySpeed() {
-      const ts = MixSync.tempoScale || 1;
-      const sp = S.userSpeed * ts;
-      if (S.api) S.api.playbackSpeed = sp;
-      MixSync.setRate(sp);
+      MixSync.setUserSpeed(S.userSpeed);
     }
 
     function refreshModeDependentUI() {
