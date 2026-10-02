@@ -1,6 +1,7 @@
 # CRITICAL
 * Le Iron Maiden Fear of The Dark avec son rythme variable est complètement faux niveau tempo, le début est bien trop rapide par rapport à guitar pro, analyse en profondeur comment gérer les rythmes variables de Guitar Pro dans la webapp.
-* Renvois incorrects MP3 dans ACDC à vérifier
+* Renvois incorrects MP3 dans ACDC à vérifier : toujours complétement faux : mesures 6-7-8-9-10 l'audio est faux alors que la séquence midi est correct : 6-8-7-9 6-7-8-9-10
+* Renvois midi incorrects dans Renaud : le début doit être 1 2 3 4 1 2 3 5 1 2 3 6
 Correction intégrale implémentée — l'horloge musicale remplace l'hypothèse « vitesse constante » pour tous les morceaux, sans branche spéciale. Récapitulatif :
 Ce qui a changé
 js/mix-sync.js — le cœur :
