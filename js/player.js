@@ -119,6 +119,7 @@
 
     function init(container) {
       createMix();                   // modèle de mixage vide, dispo tout de suite
+      installRepeatNormalization();  // AVANT toute génération MIDI/synchro
       S.api = new alphaTab.AlphaTabApi(container, CFG.alphatab);
       /* `api.player` renvoie NULL tant que `_player.instance` n'est pas prêt
          (l.46264) : on cible l'objet interne `api._player`, le
@@ -212,7 +213,10 @@
         trace('scoreLoaded', `${score.tracks.length} pistes · ${score.masterBars.length} mesures`);
         S.score = score;
         fixEmptyAnacrusis(score);       // mesures vides/pickup remises sur la timeline
-        fixAlternateEndings(score);     // fins alternées : nombre de passages correct
+        /* NB : plus AUCUNE mutation des répétitions ici. alphaTab est le seul
+           maître du déroulé (voir BUGRENVOI.md) : seules les fins multiples
+           sont normalisées, et seulement le temps d'une passe de génération
+           (installRepeatNormalization). */
         createMix();                 // un modèle neuf pour ce score
         MixSync.suspend();
         App.onScoreLoaded(score);    // DOM du tiroir (léger)
@@ -558,37 +562,102 @@
       return true;
     }
 
-    /* ---- Correctif BUGMP3 : alternate endings (volta) mal développées ----
-       alphaTab pilote le nombre de passages d'une répétition par `repeatCount`,
-       alors qu'un groupe à fins alternées en exige autant que de fins. Deux cas :
-         · une fin de répétition porte PLUSIEURS fins (masque de bits, ex. Blink
-           `alt=7` = fins 1-2-3, + une barre de fin 4) → autant de passages que la
-           fin la plus haute ;
-         · les fins alternées sont réparties sur PLUSIEURS fins de répétition
-           (ex. Renaud #17/18/19 = fins 1,2,3) → chaque fin est jouée UNE fois.
-       Sans quoi le groupe est joué trop (ou trop peu) de fois, le compteur
-       d'occurrences diverge et les points de synchro sont mal appariés. */
-    function fixAlternateEndings(score) {
+    /* ---- Correctif BUGRENVOI : fins alternées réparties sur PLUSIEURS fins
+           de répétition --------------------------------------------------
+       alphaTab fabrique `Repeat.iterations` comme un compteur PAR FIN
+       (`closingIndex`), alors que `alternateEndings` est un masque ABSOLU
+       (bit k = fin k+1). Les deux coïncident tant qu'il n'y a qu'UNE fin de
+       répétition dans le groupe — tous nos échantillons, AC/DC compris.
+       Dès qu'il y en a plusieurs, les fins se contredisent et le groupe
+       ne se dépile plus : Renaud rend 61 mesures au lieu de 119.
+
+       On ne touche PAS au contrôleur alphaTab (non exporté). On regroupe les
+       fins de répétition AVANT chaque passe de génération :
+         · les fins SAUF la dernière perdent `repeatCount` (donc
+           `isRepeatEnd` → false) et deviennent de simples mesures à masque ;
+         · la dernière garde son masque et prend `repeatCount` =
+           max(fin la plus haute portée par une fin de répétition + 1,
+               nbFins + 1, compte du groupe) → chaque fin jouée à son tour,
+               plus UNE traversée de sortie ;
+         · `repeatGroup.closings` est ramené à cette dernière fin.
+       Le compteur redevient alors global (un seul élément), les masques
+       absolus tombent sur la bonne traversée, et le groupe est déplacé de la
+       pile à la traversée de sortie — exactement le comportement attendu
+       (Renaud : 1 2 3 4 · 1 2 3 5 · 1 2 3 6 ; Iron Maiden : la fin 3, que
+       alphaTab seul ne jouait JAMAIS, réapparaît et les 4 occurrences de m14
+       enregistrées par Guitar Pro sont toutes retrouvées).
+
+       Renvoie une fonction d'annulation (ou null si rien à faire). */
+    function normalizeMultiClosingRepeats(score) {
       const mbs = score && score.masterBars;
-      if (!mbs || !mbs.length) return false;
-      const endNum = mask => { let n = 0; for (let b = 0; b < 16; b++) if (mask & (1 << b)) n = b + 1; return n; };
-      let changed = false;
-      for (let i = 0; i < mbs.length; i++) {
-        const mb = mbs[i];
-        if (!mb.isRepeatEnd || !mb.alternateEndings) continue;
-        const closings = (mb.repeatGroup && mb.repeatGroup.closings) || [mb];
-        if (closings.length > 1) {
-          if (mb.repeatCount > 1) { mb.repeatCount = 1; changed = true; }
-        } else {
-          let maxEnd = endNum(mb.alternateEndings);
-          for (let j = i + 1; j < mbs.length && mbs[j].alternateEndings; j++) {
-            const n = endNum(mbs[j].alternateEndings);
-            if (n > maxEnd) maxEnd = n;
-          }
-          if (maxEnd > mb.repeatCount) { mb.repeatCount = maxEnd; changed = true; }
-        }
+      if (!mbs || !mbs.length) return null;
+
+      // 1ᵉʳ passage : collecte, SANS mutation (l'itération ne doit pas
+      // dépendre de ce qu'on vient de modifier).
+      const groups = [];
+      const seen = new Set();
+      for (const mb of mbs) {
+        if (!mb.isRepeatEnd) continue;
+        const group = mb.repeatGroup;
+        if (!group || !group.closings || group.closings.length < 2) continue;
+        if (seen.has(group)) continue;
+        seen.add(group);
+        groups.push(group);
       }
-      return changed;
+      if (!groups.length) return null;
+
+      // 2ᵉ passage : mutation.
+      const endNum = mask => { let n = 0; for (let b = 0; b < 16; b++) if (mask & (1 << b)) n = b + 1; return n; };
+      const undo = [];
+      for (const group of groups) {
+        const original = group.closings;               // référence d'origine
+        const closings = original.slice();             // copie ordonnée de travail
+        const last = closings[closings.length - 1];
+        const entries = closings.map(c => ({ mb: c, rc: c.repeatCount }));
+        const maxRc = entries.reduce((n, e) => Math.max(n, e.rc), 0);
+        // Le compteur doit aller au-delà de la fin la plus haute PORTÉE par une
+        // fin de répétition (une fin peut en porter plusieurs, ex. [1,2]) : la
+        // dernière fin la joue à son tour, puis UNE traversée de sortie.
+        const maxEnding = closings.reduce((n, c) => Math.max(n, endNum(c.alternateEndings)), 0);
+        const target = Math.max(maxEnding + 1, closings.length + 1, maxRc);
+        undo.push({ group, original, entries });
+        for (let i = 0; i < closings.length - 1; i++) closings[i].repeatCount = 0;
+        last.repeatCount = target;
+        group.closings = [last];
+      }
+
+      return function restore() {
+        for (const u of undo) {
+          u.group.closings = u.original;
+          for (const e of u.entries) e.mb.repeatCount = e.rc;
+        }
+      };
+    }
+
+    /* Enveloppe `MidiFileGenerator._playThroughSong` — le SEUL point par
+       lequel alphaTab parcourt la chanson (génération MIDI, points de synchro
+       ET table de tempo modifié s'y réunissent). La normalisation n'existe
+       donc que pendant l'appel : le rendu, la recherche et l'export voient le
+       score d'origine. */
+    function installRepeatNormalization() {
+      try {
+        const MFG = alphaTab.midi && alphaTab.midi.MidiFileGenerator;
+        const orig = MFG && MFG._playThroughSong;
+        if (typeof orig !== 'function' || orig.__gp8Renfoi) return;
+        const wrap = function (score) {
+          const restore = normalizeMultiClosingRepeats(score);
+          try {
+            return orig.apply(this, arguments);
+          } finally {
+            if (restore) restore();
+          }
+        };
+        wrap.__gp8Renfoi = true;
+        MFG._playThroughSong = wrap;
+        trace('renvoi', 'normalisation fins multiples installée');
+      } catch (e) {
+        console.warn('[renvoi] normalisation multi-fins impossible', e);
+      }
     }
 
     /* Remplit le modèle avec les niveaux d'origine SANS toucher aux canaux
