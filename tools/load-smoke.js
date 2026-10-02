@@ -27,6 +27,7 @@ const ORDER = [
   'js/audio-sync.js',
   'js/embedded-audio.js',
   'js/mix-sync.js',
+  'js/repeat-oracle.js',
   'js/player.js',
   'js/samples.js',
   'js/app.js'
@@ -236,7 +237,7 @@ function main() {
   /* --- bindings attendus après chargement complet ------------------- */
   const expected = [
     'CFG', 'AT', 'enumId', 'safe', 'clamp', 'fmtTime',
-    'AudioSync', 'EmbeddedAudio', 'MixSync', 'Player', 'Samples', 'App'
+    'AudioSync', 'EmbeddedAudio', 'MixSync', 'RepeatOracle', 'Player', 'Samples', 'App'
   ];
   const missing = expected.filter(n => {
     try { return vm.runInContext('typeof ' + n, ctx) === 'undefined'; }

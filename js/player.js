@@ -213,10 +213,20 @@
         trace('scoreLoaded', `${score.tracks.length} pistes · ${score.masterBars.length} mesures`);
         S.score = score;
         fixEmptyAnacrusis(score);       // mesures vides/pickup remises sur la timeline
-        /* NB : plus AUCUNE mutation des répétitions ici. alphaTab est le seul
-           maître du déroulé (voir BUGRENVOI.md) : seules les fins multiples
-           sont normalisées, et seulement le temps d'une passe de génération
-           (installRepeatNormalization). */
+        /* NB : deux interventions sur les répétitions, et TOUTES deux dictées
+           par le .gp lui-même (voir BUGRENVOI.md / BUGMP3 §14) :
+             · les fins multiples sont normalisées, mais seulement le temps
+               d'une passe de génération (installRepeatNormalization) ;
+             · `repeatCount` peut être relevé une fois pour toutes, quand
+               Guitar Pro a enregistré PLUS de traversées que la partition n'en
+               joue. Sans cela la marche saute des passages existant dans
+               l'enregistrement, le pont étire un segment court sur une longue
+               plage d'audio et plaque le MIDI à 0,5×.
+           Le reste du déroulé reste celui d'alphaTab, seul maître. */
+        if (hasEmbeddedAudio(score)) {
+          RepeatOracle.raise(score,
+            alphaTab.midi && alphaTab.midi.MidiFileGenerator, trace);
+        }
         createMix();                 // un modèle neuf pour ce score
         MixSync.suspend();
         App.onScoreLoaded(score);    // DOM du tiroir (léger)
@@ -634,27 +644,18 @@
       };
     }
 
-    /* Enveloppe `MidiFileGenerator._playThroughSong` — le SEUL point par
-       lequel alphaTab parcourt la chanson (génération MIDI, points de synchro
-       ET table de tempo modifié s'y réunissent). La normalisation n'existe
-       donc que pendant l'appel : le rendu, la recherche et l'export voient le
-       score d'origine. */
+    /* Pose l'enveloppe `MidiFileGenerator._playThroughSong`, décrite en tête
+       de js/repeat-oracle.js : c'est le SEUL point par lequel alphaTab
+       parcourt la chanson (génération MIDI, points de synchro ET table de
+       tempo modifié s'y réunissent), donc le seul endroit où la normalisation
+       des fins multiples peut s'appliquer — et le seul où l'on peut OBSERVER
+       les traversées réellement jouées (l'oracle RC-1 s'en nourrit). */
     function installRepeatNormalization() {
       try {
         const MFG = alphaTab.midi && alphaTab.midi.MidiFileGenerator;
-        const orig = MFG && MFG._playThroughSong;
-        if (typeof orig !== 'function' || orig.__gp8Renfoi) return;
-        const wrap = function (score) {
-          const restore = normalizeMultiClosingRepeats(score);
-          try {
-            return orig.apply(this, arguments);
-          } finally {
-            if (restore) restore();
-          }
-        };
-        wrap.__gp8Renfoi = true;
-        MFG._playThroughSong = wrap;
-        trace('renvoi', 'normalisation fins multiples installée');
+        const st = RepeatOracle.install(MFG, normalizeMultiClosingRepeats, trace);
+        if (st === 'installed') trace('renvoi', 'normalisation fins multiples installée');
+        else if (st === 'failed') console.warn('[renvoi] normalisation multi-fins impossible');
       } catch (e) {
         console.warn('[renvoi] normalisation multi-fins impossible', e);
       }

@@ -20,6 +20,14 @@
    ⚠ Les constantes et formules ci-dessous sont le MIROIR de
      js/mix-sync.js. En cas de modification de l'une, modifier l'autre.
 
+   ⚠⚠ MIROIR PÉRIMÉ côté répétitions (BUGLATEST.md, tâche T4) : le score
+     reconstruit ici applique encore `fixAlternateEndings` (~l.361),
+     SUPPRIMÉ du code livré en `c7609e6` et remplacé depuis par
+     normalizeMultiClosingRepeats + js/repeat-oracle.js. Les pentes, points
+     et « écritures tempo » mesurées par cet audit correspondent donc à
+     l'ANCIEN comportement, pas à celui de l'application. Pour l'état réel
+     du pont : node tools/repeat-check.js
+
    Usage :  node tools/sync-audit.js             (tous les samples)
             node tools/sync-audit.js --gp <fich>  (un seul .gp)
             node tools/sync-audit.js --dt 25      (pas de simulation, ms)

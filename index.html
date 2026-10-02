@@ -330,7 +330,7 @@
   </div>
 
   <!-- Ordre OBLIGATOIRE. Ce ne sont PAS des modules ES (l'app doit s'ouvrir
-       depuis file://) mais 7 <script classique> qui partagent les bindings
+       depuis file://) mais 8 <script classique> qui partagent les bindings
        lexicographiques globaux (CFG, AT, $, safe, Player, Samples, App…).
        Un tag déplacé casse le chargement : `node tools/load-smoke.js`
        vérifie l'ordre déclaré dans index.html ET l'exécution complète. -->
@@ -338,6 +338,7 @@
   <script src="js/audio-sync.js"></script>      <!-- <audio> HTML5 caché -->
   <script src="js/embedded-audio.js"></script>  <!-- JSZip : audio embarqué du .gp -->
   <script src="js/mix-sync.js"></script>        <!-- synthé alphaTab (maître) + <audio> (esclave) -->
+  <script src="js/repeat-oracle.js"></script>   <!-- traversées = points GPIF (RC-1) -->
   <script src="js/player.js"></script>          <!-- wrapper alphaTab : mélangeur, boucle, affichage -->
   <script src="js/samples.js"></script>         <!-- découverte des fichiers d'exemple -->
   <script src="js/app.js"></script>             <!-- interface, tiroir, raccourcis, boot() -->
