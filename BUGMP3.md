@@ -745,3 +745,223 @@ horloge intégrée, colonne « écrit.tempo ») sur les 14 samples :**
 Maiden (intro lente correcte + transitions de tempo aux frontières, calée sur
 le GP), Dr. Stein (inchangé),blink/ACDC (volta + sauts), puis vitesse
 utilisateur ×0,5/×2 pendant la lecture (le moteur doit composer les deux).
+
+---
+
+## 14. Root cause des saccades / micro-sauts — Slayer « Hell Awaits » (~1′) et Dr. Stein (« moins bonne qualité »)
+
+> **Analyse statique uniquement** (harnais Node + lecture du code) — **aucun code
+> n'a été modifié**, conformément à la consigne. Les trois causes ci-dessous sont
+> indépendantes et cumulatives : RC-1 est une **régression du commit `c7609e6`**
+> (renvois), RC-2 une **régression du commit `47014c0`** (moteur de tempo §13),
+> RC-3 est **pré-existante** (depuis le contrôleur actuel de `mix-sync.js`).
+
+### 14.1 RC-1 — `c7609e6` fait perdre 8 points de synchro à Slayer (0 avant) → 4 segments de pont étirés
+
+La suppression de `fixAlternateEndings` (commit `c7609e6`) raccourcit la marche
+alphaTab de **221 → 209 mesures** sur Slayer. Appariement exact des clés
+`(mesure, occurrence)` ↔ points GPIF de GP (`%TEMP%\opencode\slayer-keys.js`) :
+
+| | marche livrée | marche avec l'ancien fix |
+|---|---|---|
+| points GPIF couverts | **140 / 148** | **148 / 148** |
+| segments à pente extrême (hors [0,5 ; 1,4]) | **4** | **0** |
+| pire pente locale | **2,23** (hors clamp [0,5;2]) | 1,42 |
+
+Les 8 points **GP perdus** (temps mp3) : `44.2@197,1` · `45.2@198,2` · `46.2@199,4`
+· `53.2@215,0` · `53.3@217,3` · `106.2@315,3` · `117.2@347,1` · `117.3@349,4`.
+Concrètement la marche actuelle ne joue que `44.0,44.1` (GP a `44.0,44.1,44.2`),
+`53.0,53.1` (GP a 4 passages) et `117.0,117.1` (GP a 4 passages) → **un passage
+entier de répétition disparaît**, l'axe audio de GP, lui, garde la matière.
+
+Conséquence sur le pont (`%TEMP%\opencode\timeline.js`, code livré) — les 4
+segments « saut de tempo » tombent **exactement** dans les zones où les points
+ont été perdus :
+
+| pente | position partition | position mp3 | `playbackSpeed` écrit |
+|---|---|---|---|
+| **2,23** (hors clamp) | 02:08,5 → 02:10,9 | 03:16 → 03:21 | **0,500** |
+| 1,79 | 02:23,5 → 02:27,1 | 03:33 → 03:40 | 0,559 |
+| 1,45 | 04:07,3 → 04:13,4 | 05:11 → 05:20 | 0,692 |
+| 1,81 | 04:41,0 → 04:44,6 | 05:45 → 05:52 | 0,553 |
+
+→ à ces 4 endroits le moteur de tempo force le MIDI à **0,50–0,69× pendant 3 à
+6 s** alors que l'audio reste ~1× ; console : `[mix] tempo hors plage — 0 saut(s),
+1 pente(s) hors plage … pente 2.23`. **Avant `c7609e6` : aucun de ces segments
+n'existe.**
+
+Rayon d'impact du même commit sur le pont (`sweep-coverage.js`, 14 fichiers —
+points GPIF non couverts : *maintenant / avant*) :
+
+| fichier | GPIF | non couverts | segments extrêmes | pire pente |
+|---|---|---|---|---|
+| **Slayer** | 148 | **8 / 0** ⚠ | **4 / 0** | **2,23** (avant 1,42) |
+| **Blink 182** | 147 | **9 / 0** ⚠ | 3 / 2 | 28,69 (avant 11,76) |
+| **The Offspring** | 259 | **15 / 9** ⚠ | 3 / 1 | **246,4** (avant 7,80) |
+| Iron Maiden | 136 | 2 / **13** ↓ | 111 / 101 | 11,27 (inchangé) |
+| Renaud | 156 | 44 / **92** ↓ | 24 / 19 | 46,4 (avant 86,3) |
+| AC/DC, Europe, F-Zero, Helloween, Igorrr ×2, Led Zep, Metallica, Sepultura | — | inchangés | inchangés | inchangés |
+
+Effets mesurés côté recadrage (`timeline.js`, vie → actuel) :
+**Blink** gagne un saut dur de **11,2 s** à 00:27,2 (dérive −11 241 ms) ;
+**Offspring** gagne un saut de **6,9 s** à 00:51,6 (dérive −6 896 ms) et deux
+sauts fous de **±130 s** à 02:51,5 / 02:56,2 (dérive +127 449 / −138 855 ms) ;
+**Slayer** n'a, lui, **aucun recadrage** en cours de route (0 seek simulé) :
+ses saccades ne viennent donc **pas** d'un recadrage d'audio.
+
+### 14.2 RC-2 — chaque écriture de `playbackSpeed` est une **coupure totale du synthé** (régression `47014c0`)
+
+`applyTempo()` (`mix-sync.js` l.335) écrit `api.playbackSpeed` en cours de
+lecture. Chaîne alphaTab suivie à travers le code :
+
+1. `AlphaTabApi.playbackSpeed` (alphaTab.js l.46638) →
+2. `AlphaSynth.set playbackSpeed` → `updatePlaybackSpeed` (l.39842-39850) :
+   `sequencer.playbackSpeed = value; this.timePosition = this.timePosition * (oldSpeed / value);`
+3. `set timePosition` (l.39866-39874) — **exécuté à chaque écriture** :
+   ```js
+   this.sequencer.mainSeek(value);
+   this.updateTimePosition(value, true);
+   if (this.sequencer.isPlayingMain) {
+     this._notPlayedSamples = 0;     // le buffer de rendu avancé est jeté
+     this.output.resetSamples();     // le buffer de sortie est vidé
+   }
+   ```
+4. `mainSeek` (l.35039-35061) : comme le séquenceur est **toujours en avance de
+   rendu** (δ > 0, pipeline worklet/worker), la branche arrière est prise :
+   `currentTime = 0` → `noteOffAll(true)` + `resetSoft()` → `_mainSilentProcess`
+   **re-rend silencieusement depuis 0 jusqu'à la position courante**
+   (l.35062-35072).
+
+`output.resetSamples()` n'est appelé **nulle part ailleurs** en lecture normale
+que sur les transitions de discontinuité : `stop()`/seek utilisateur,
+`playOneTimeMidiFile` (l.40009), fin de count-in (l.40115), fin de one-time
+(l.40118) — c'est une **primitive de saut, pas de changement de vitesse**.
+
+**Bilan : une écriture tempo = toutes les notes coupées sec + buffer de sortie
+vidé (trou dans le flux MIDI) + re-rendu depuis 0 côté worker.**
+Régression : avant `47014c0`, `applySpeed()` n'écrivait `playbackSpeed` **qu'au
+chargement** (et au geste utilisateur) → **0 écriture en lecture**. Depuis :
+**399 écritures tempo sur les 14 samples** (§13) — mesurées pour les deux
+morceaux signalés : **Slayer 37**, **Dr. Stein 23**, Offspring 132, Blink 39.
+
+Note importante (vérifiée par greps) : contrairement à ce qu'on pourrait
+craindre, alphaTab **ne** réécrit **pas** `sequencer.playbackSpeed` en lecture
+temps réel — le bloc `syncPointTempo / currentTempo` (l.40364-40373) n'existe
+que dans l'**exporteur audio** (`SynthExporter.render`). Notre écriture est donc
+la seule qui pilote le tempo réel du synthé : le nombre de coupures est
+exactement le nombre d'écritures ci-dessus (pas de tempête supplémentaire, ni
+de tempête cachée). Le mécanisme de suivi de tempo par sync points existe donc
+chez alphaTab, mais **il n'est branché que sur l'export** — d'où le choix (§13)
+de l'implémenter côté webapp ; c'est son **côté effet de bord** qui n'a pas été
+anticipé.
+
+### 14.3 RC-3 — le correcteur audio est en **cycle de relais permanent** (aucune convergence)
+
+`correct()` (`mix-sync.js` l.429-493) :
+
+```js
+if (Math.abs(drift) > HOLD_MS) { seekTo(target); setRate(sp); return; }   // 400 ms
+if (Math.abs(drift) < DEADBAND_MS) return;                                // 100 ms : on n'y touche PAS
+if (now - lastWrite < WRITE_MS) return;                                   // 1,5 s
+const r = sp * slope * (1 - clamp(drift / GAIN, -NUDGE, NUDGE));          // GAIN 2000, NUDGE 0,10
+if (Math.abs(a.playbackRate - r) > RATE_EPS) a.playbackRate = r;          // EPS 0,03
+```
+
+**Le défaut est structurel : la zone morte ne remet jamais la vitesse au neutre.**
+
+* Base neutre : `sp × slope = (1/pente) × pente = 1` exactement (les deux tables
+  sont la même) → l'audio « idéal » tourne à 1,000×.
+* Dans la zone morte (|dérive| ≤ 100 ms), le facteur de correction reste celui
+  de la **dernière écriture** : `1 − drift/2000`, soit **±5 % maximum** (100/2000),
+  **jamais ramené à 1,0**.
+* Tant que `rate ≠ 1`, la dérive **continue de traverser** la zone morte →
+  elle en ressort toujours par le bord opposé → nouvelle écriture avec le signe
+  inverse → **indéfiniment**.
+
+Prédiction du modèle : amplitude ±100…115 ms (dépassement dû à
+`CONTROL_MS=250` + `WRITE_MS=1500`), période ≈ 200 ms ÷ (5 % × 1000 ms/s) =
+**≈ 4 s/écriture**. Mesuré : **Slayer 72 écritures / 307 s = 4,3 s** ·
+**Dr. Stein 62-63 / 334 s = 5,4 s** ✓.
+
+Ce que ça produit, **en permanence, dès les ~10 premières secondes** :
+
+1. `playbackRate` réécrit **toutes les ~4 s** entre ~0,95 et ~1,05 →
+   reconfiguration de la chaîne média `<audio>` à chaque fois + `preservesPitch`
+   actif en continu (time-stretch STFT quasi permanent → perte de netteté /
+   artefacts métalliques) ;
+2. décalage **MP3 ↔ MIDI bloqué à ±100…115 ms** (le correcteur ne converge
+   *jamais* sous le seuil) → en mode mix les deux sources sont écoutées
+   ensemble → battement / voile / écho ;
+3. zéro recadrage utile : `nSeek = 0` sur Slayer → tout le budget de correction
+   part en oscillation.
+
+**RC-3 est antérieure à `47014c0`** (le même relais existait déjà) : elle
+explique le *niveau de base* d'artefacts sur **tous** les morceaux, tandis que
+RC-2 explique la **dégradation « maintenant »** de Dr. Stein et que RC-1 explique
+les saccades **Slayer** apparues avec `c7609e6`.
+
+### 14.4 « Vers 1′ » — les trois candidats mesurés (Slayer)
+
+1. **Recadrage initial** : le 1er point GPIF de Slayer est `0,0@64 734,7 ms` —
+   la partition démarre à **01:04,7 du mp3** (données GP, comme Europe 00:12,8 /
+   Dr. Stein 00:25,8, tous les autres ≤ 00:07). Au `Play`, `resync()` (l.392)
+   y seek l'audio : c'est le seul événement brutal « vers 1′ » **avant** la
+   lecture.
+2. **Le cycle RC-3** : première écriture ~7 s après le départ, régime permanent
+   dès ~20 s → à 1′ de lecture le ±5 % et l'écart de ±100 ms sont bien établis
+   (écritures `rate` à 00:52,3 / 00:56,1 / **01:00,0** de partition, soit
+   mp3 01:59,1 / 02:03,0 / **02:07,0**).
+3. ~~Recadrage lié aux points perdus~~ : **écarté pour Slayer** (0 seek simulé) —
+   mais **valable pour Offspring** (saut de 6,9 s à 00:51,6) et **Blink**
+   (saut de 11,2 s à 00:27,2) : à vérifier si « 1′ » désignait un de ces 2 titres.
+
+### 14.5 Comment trancher en 2 minutes, sans toucher au code
+
+1. **Console au chargement de Slayer** : la ligne
+   `[mix] tempo hors plage — 0 saut(s), 1 pente(s) hors plage … pente 2.23`
+   confirme **RC-1** toute seule (elle ne s'affiche que si un segment est hors
+   [0,5 ; 2]). Sur la même console : `[renvoi] normalisation fins multiples
+   installée` + `[mix] … point(s) de synchro`.
+2. **`[mix-stats]` toutes les 5 s** : `playbackRate 0,20 – 0,25 écriture/s`
+   (= une toutes les ~4 s) et `dérive max 100 – 160 ms` confirment **RC-3**.
+   Si `dérive max` atteint ≥ 400 ms ou `arrêts maître` > 0, il y a en plus des
+   recadrages / gel du maître (autre cause).
+3. **Test d'isolation A/B (le plus décisif)** :
+   * couper la **piste audio** (mute du tiroir mixeur) → les saccades
+     *persistent* ⇒ chemin MIDI (**RC-2**, coupures du synthé) ;
+   * couper le **master MIDI** → elles *persistent* ⇒ chemin MP3 (**RC-3**,
+     écritures `playbackRate`) ;
+   * si elles **disparaissent des deux côtés séparément**, les deux causes sont
+     cumulatives (cas attendu).
+4. Pour localiser « 1′ » : noter si le repère est la **position du mp3**
+   (→ candidat 1 : le départ à 01:04,7) ou la **position de la partition**
+   (→ candidat 2 : le cycle ±5 %).
+
+### 14.6 Biais de mesure connus (à garder en tête avant tout arbitrage)
+
+* **`tools/sync-audit.js` applique encore `fixAlternateEndings`** (l.361) alors
+  que le code livré ne l'applique plus → **tous ses chiffres décrivent l'ancien
+  comportement**, pas le code livré. C'est un miroir périmé (ex. : il annonce
+  « 0 pente hors plage » sur Slayer alors que le code livré en a 1).
+* **L'en-tête de `mix-sync.js` (l.33-36) est en déphasage avec le code** :
+  il décrit « 25 ms → ajustement fin ±10 % », le code fait
+  « 100 ms → ±5 % max, une écriture toutes les 1,5 s ».
+* **Le harnais ne modélise pas le pipeline de rendu** (δ, profondeur du buffer) :
+  il simule juste le *choix* de RC-2. Le coût réel par écriture (noteOffAll +
+  vidage + re-rendu depuis 0) est donc **sous-estimé**, pas surévalué.
+* Tous les `.gp` embarquent un mp3 ; seul Slayer est en **44,1 kHz** (les autres
+  48 kHz / 160 kbps CBR) — écarté comme cause (§3.2), mais à garder en tête.
+
+### 14.7 Pistes d'arbitrage (rien n'a été codé)
+
+* **RC-1** : réconcilier marche alphaTab ↔ occurrences GP **sans** réintroduire
+  `fixAlternateEndings` tel quel (il réparait Slayer mais détruisait Renaud/
+  Iron Maiden) — cf. §12.1/§12.2 et la piste H1/H2 (`barOccurrence`).
+* **RC-2** : écrire le tempo du segment **sans** traverser le setter
+  `timePosition` d'alphaTab (soit une API qui ne seek pas, soit ne pas écrire
+  `playbackSpeed` du tout et piloter autrement), ou accepter le coût conscient
+  d'une écriture par vraie frontière de tempo (et non par segment).
+* **RC-3** : ramener la vitesse **au neutre** (`sp × slope`) dès l'entrée en zone
+  morte, pour que la dérive s'arrête d'elle-même — correcteur classique à
+  bande morte *à sortie nulle*, cf. §9 « Cause A ».
+
