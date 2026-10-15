@@ -1,10 +1,10 @@
 /* ==================================================================
-   GP8 PLAYER â€” js/player.js
-   5. PLAYER â€” Wrapper alphaTab : chargement, lecture, mÃ©langeur, boucle, affichage.
+   GP8 PLAYER — js/player.js
+   5. PLAYER — Wrapper alphaTab : chargement, lecture, mélangeur, boucle, affichage.
    ------------------------------------------------------------------
-   ChargÃ© en <script classique> par index.html, dans l'ordre de l'ancien
+   Chargé en <script classique> par index.html, dans l'ordre de l'ancien
    app.js monolithique. Le partage se fait par les bindings lexicographiques
-   globaux (CFG, AT, $, safe, Player, Appâ€¦), PAS par des imports : un module
+   globaux (CFG, AT, $, safe, Player, App…), PAS par des imports : un module
    ES est impossible ici car l'application doit s'ouvrir depuis file://.
    ================================================================== */
 'use strict';

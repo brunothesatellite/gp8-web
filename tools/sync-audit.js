@@ -20,13 +20,17 @@
    ⚠ Les constantes et formules ci-dessous sont le MIROIR de
      js/mix-sync.js. En cas de modification de l'une, modifier l'autre.
 
-   ⚠⚠ MIROIR PÉRIMÉ côté répétitions (BUGLATEST.md, tâche T4) : le score
-     reconstruit ici applique encore `fixAlternateEndings` (~l.361),
-     SUPPRIMÉ du code livré en `c7609e6` et remplacé depuis par
-     normalizeMultiClosingRepeats + js/repeat-oracle.js. Les pentes, points
-     et « écritures tempo » mesurées par cet audit correspondent donc à
-     l'ANCIEN comportement, pas à celui de l'application. Pour l'état réel
-     du pont : node tools/repeat-check.js
+   MISE EN PHASE (BUGLATEST.md tâche T4 — fait) : le score est reconstruit
+   par le MÊME chemin que l'application :
+       fixEmptyAnacrusis  →  RepeatOracle.raise  →  generateSyncPoints
+   `fixAlternateEndings` (SUPPRIMÉ du code livré en c7609e6) n'est plus
+   appliqué : les pentes, points et « écritures tempo » décrivent donc le
+   comportement RÉEL. `normalizeMultiClosingRepeats` et l'oracle sont
+   requis depuis le dépôt (aucune copie).
+
+   Le contrôleur lui-même (js/mix-sync.js, exécuté tel quel) est couvert par
+   tools/mix-sync-harness.js ; cet audit-ci reste la vue « table de pont »
+   comparée LEGACY vs NEW.
 
    Usage :  node tools/sync-audit.js             (tous les samples)
             node tools/sync-audit.js --gp <fich>  (un seul .gp)
@@ -50,6 +54,30 @@ const JUMP_SLOPE = 3.0, SLOPE_MIN = 0.5, SLOPE_MAX = 2.0;
 const TEMPO_EPS = 0.04, TEMPO_HOLD_MS = 300;   // §13 : tempo par segment
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+/* ---- fonctions LIVRÉES dans js/player.js (extraites, aucune copie) --- */
+function extractFn(src, name) {
+  const i = src.indexOf('function ' + name + '(');
+  if (i < 0) throw new Error('fonction introuvable dans player.js : ' + name);
+  const start = src.indexOf('{', i);
+  let depth = 0;
+  for (let k = start; k < src.length; k++) {
+    if (src[k] === '{') depth++;
+    else if (src[k] === '}') { depth--; if (depth === 0) return src.slice(i, k + 1); }
+  }
+  throw new Error('fonction non terminée : ' + name);
+}
+const playerSrc = fs.readFileSync(path.join(ROOT, 'js', 'player.js'), 'utf8');
+const fixEmptyAnacrusis = new Function(
+  extractFn(playerSrc, 'fixEmptyAnacrusis') + '; return fixEmptyAnacrusis;')();
+const normalizeMultiClosingRepeats = new Function(
+  extractFn(playerSrc, 'normalizeMultiClosingRepeats') +
+  '; return normalizeMultiClosingRepeats;')();
+
+/* ---- module LIVRÉ : js/repeat-oracle.js (requis tel quel) ----------- */
+require(path.join(ROOT, 'js', 'repeat-oracle.js'));
+const RO = globalThis.RepeatOracle;
+if (!RO) throw new Error('RepeatOracle non exposé par js/repeat-oracle.js');
 
 /* ============================ ZIP minimal ========================== */
 /* Lit une entrée précise (Content/score.gpif) d'un conteneur .gp/zip
@@ -324,49 +352,11 @@ function buildJumpAt(raw) {
 }
 
 /* ============================== main =============================== */
-/* MIROIR de player.js fixEmptyAnacrusis — remet sur la timeline une mesure
-   "anacrusis" (pickup) vide qu'alphaTab réduit à 0 tick. */
-function fixEmptyAnacrusis(score) {
-  const mbs = score && score.masterBars;
-  if (!mbs || !mbs.length) return false;
-  let changed = false;
-  for (const mb of mbs) {
-    if (mb.isAnacrusis && mb.calculateDuration() === 0) { mb.isAnacrusis = false; changed = true; }
-  }
-  if (!changed) return false;
-  for (let i = 1; i < mbs.length; i++) mbs[i].start = mbs[i - 1].start + mbs[i - 1].calculateDuration();
-  return true;
-}
-
-/* MIROIR de player.js fixAlternateEndings — alternate endings (volta). */
-function fixAlternateEndings(score) {
-  const mbs = score && score.masterBars;
-  if (!mbs || !mbs.length) return false;
-  const endNum = mask => { let n = 0; for (let b = 0; b < 16; b++) if (mask & (1 << b)) n = b + 1; return n; };
-  let changed = false;
-  for (let i = 0; i < mbs.length; i++) {
-    const mb = mbs[i];
-    if (!mb.isRepeatEnd || !mb.alternateEndings) continue;
-    const closings = (mb.repeatGroup && mb.repeatGroup.closings) || [mb];
-    if (closings.length > 1) {
-      if (mb.repeatCount > 1) { mb.repeatCount = 1; changed = true; }
-    } else {
-      let maxEnd = endNum(mb.alternateEndings);
-      for (let j = i + 1; j < mbs.length && mbs[j].alternateEndings; j++) {
-        const n = endNum(mbs[j].alternateEndings);
-        if (n > maxEnd) maxEnd = n;
-      }
-      if (maxEnd > mb.repeatCount) { mb.repeatCount = maxEnd; changed = true; }
-    }
-  }
-  return changed;
-}
-
 function runOne(at, gpPath) {
   const bytes = new Uint8Array(fs.readFileSync(gpPath));
   const score = at.importer.ScoreLoader.loadScoreFromBytes(bytes, new at.Settings());
-  fixEmptyAnacrusis(score);            // MIROIR de player.js (mesures vides/pickup)
-  fixAlternateEndings(score);          // MIROIR de player.js (fins alternées)
+  fixEmptyAnacrusis(score);            // LIVRÉ dans player.js (mesures vides/pickup)
+  RO.raise(score, at.midi.MidiFileGenerator, null);   // LIVRÉ : RC-1 (fins alternées/répétitions)
   const gen   = at.midi.MidiFileGenerator.generateSyncPoints(score) || [];
   const raw   = gen.filter(p => p && isFinite(p.synthTime) && isFinite(p.syncTime))
                    .map(p => ({ t: p.synthTime, a: p.syncTime }))
@@ -416,6 +406,10 @@ ensureAlphaTab(() => {
   catch (e) { console.error('alphaTab injonctable : ' + e.message); process.exit(1); }
   if (!at || !at.midi || !at.midi.MidiFileGenerator) {
     console.error('alphaTab chargé mais MidiFileGenerator absent'); process.exit(1);
+  }
+  const etat = RO.install(at.midi.MidiFileGenerator, normalizeMultiClosingRepeats, null);
+  if (etat !== 'installed' && etat !== 'already') {
+    console.error('RepeatOracle.install → ' + etat); process.exit(1);
   }
 
   const files = onlyGp

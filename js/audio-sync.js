@@ -1,10 +1,10 @@
 /* ==================================================================
-   GP8 PLAYER â€” js/audio-sync.js
-   2. AUDIO SYNC â€” <audio> HTML5 cachÃ© (piste audio embarquÃ©e).
+   GP8 PLAYER — js/audio-sync.js
+   2. AUDIO SYNC — <audio> HTML5 caché (piste audio embarquée).
    ------------------------------------------------------------------
-   ChargÃ© en <script classique> par index.html, dans l'ordre de l'ancien
+   Chargé en <script classique> par index.html, dans l'ordre de l'ancien
    app.js monolithique. Le partage se fait par les bindings lexicographiques
-   globaux (CFG, AT, $, safe, Player, Appâ€¦), PAS par des imports : un module
+   globaux (CFG, AT, $, safe, Player, App…), PAS par des imports : un module
    ES est impossible ici car l'application doit s'ouvrir depuis file://.
    ================================================================== */
 'use strict';

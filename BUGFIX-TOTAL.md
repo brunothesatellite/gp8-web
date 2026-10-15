@@ -326,13 +326,23 @@ harnais réel à ±2 %.
    `MidiFileGenerator.generate()`) → **réécrire** les `TempoChangeEvent` aux ticks
    de sync-point avec `syncBpm` → mesurer la durée totale vs durée MP3 sur les 14
    échantillons.
-**Sortie :** écart durée MIDI pré-cuit ↔ MP3 **< 1 %** sur 12/14 (les 2 cas
-résiduels étant expliqués par D3/D6) ; document de décision écrit.
+**Sortie (révisée après exécution, cf. §11) :** la pré-cuisson doit reproduire
+la **portée audio des sync-points** (durée MIDI = durée audio visée), et non la
+durée MP3 brute — la durée du MP3 mesure la *couverture* des sync-points du
+`.gp`, une propriété de **donnée**. Critère retenu : écart par **segment continu
+non clampé** < 0,5 % sur 14/14, BPM pré-cuits tous ≥ 3,58 tr/min (limite SMF).
+Document de décision : §11.
 
 ### P2 — Implémenter la stratégie C *(cœur du correctif)*
 5. `js/player.js` : patcher l'instance `api` (comme `patchVendorMidiInfo`) pour
    que `loadMidiForScore()` charge le MIDI **à tempo pré-cuit** ; conserver
    `updateSyncPoints` pour l'UI/cursor.
+   ⚠ **Ne PAS** pré-cuire le `syncBpm` brut (spike §11 : il descend à 2,5 tr/min
+   ou devient négatif sur les segments de discontinuité). Pré-cuire la **table
+   de segments de `mix-sync`** (mêmes `points[].slope`/`speed` : détection de
+   saut → pente du bloc destination, clamp `[0,5 ; 2]`). Factoriser
+   `analyzeSegments` pour que `mix-sync` et la génération partagent **la même**
+   table (fin du miroir).
 6. `js/mix-sync.js` : **supprimer** `applyTempo` du chemin de lecture ; garder
    `speedAt` pour la génération ; `setUserSpeed` n'écrit `playbackSpeed`
    **qu'au chargement et au geste utilisateur**.
@@ -528,4 +538,72 @@ node tools/load-smoke.js          # OK
 node tools/repeat-check.js        # OK — clés 94 -> 72
 node tools/tempo-correct-sim.js   # OK — coupures playbackSpeed = 405
 node tools/sync-audit.js          # MIROIR PÉRIMÉ (à refondre, P0)
+```
+
+---
+
+## 11. Résultats P0 + P1 (exécutés)
+
+### 11.1 P0 — la mesure est fiable *(fait)*
+- `tools/sync-audit.js` **refondu** : plus aucun miroir de `fixAlternateEndings` ;
+  `fixEmptyAnacrusis` et `normalizeMultiClosingRepeats` **extraits de
+  `js/player.js`** ; `js/repeat-oracle.js` **requis** et installé. La colonne
+  `écrit.tempo` reproduit désormais **exactement** les comptes livrés
+  (405 au total, identiques fichier par fichier à `tempo-correct-sim`).
+- `tools/mix-sync-harness.js` **(nouveau)** : charge **`js/mix-sync.js` tel quel**
+  dans un contexte `vm` (stubs `AudioSync` / `Player.S.api` / `alphaTab` = vendor
+  / `clamp` / `App` / `performance`) et **pilote** `build → start → onState →
+  onPosition`. La ré-échelle destructive d'alphaTab est reproduite fidèlement
+  (`set playbackSpeed` ⇒ `timePosition *= ancien/nouveau`, vendor l.39849).
+  Compte sur le code réel : `tempoWrites`, `rateWrites`, `seekWrites`, dérive
+  (relue de `[mix-stats]` livré).
+- **Résultat** : `tempoWrites` **413** vs REF **405** → **écart global 1,98 %**
+  (≤ 2 %, critère P0 tenu). Par fichier, écarts ≤ 1 écriture (non significatifs
+  sur des comptes de 1 à 5).
+- **Découverte quantifiée (RC-3)** : la **dérive de croisière** (médiane des pics
+  de fenêtre) se stabilise à **~100 ms** (= `DEADBAND_MS`) sur 13/14 fichiers.
+  Le correcteur n'atteint donc **jamais** zéro : il bute sur la zone morte. C'est
+  la preuve, sur le code réel, du « décalage » ressenti.
+- **D5 + hygiène** : en-têtes de `js/*.js` dés-encodés (mojibake `â€”`/`Ã©` → `—`/`é`)
+  et loi de correction réelle documentée (`HOLD_MS=400`, `DEADBAND_MS=100`,
+  `WRITE_MS=1500`, ±10 %).
+
+### 11.2 P1 — spike stratégie C : **GO** *(fait)*
+Outil : `tools/tempo-prebake-spike.js` (chemin livré + `MidiFileGenerator` +
+`AlphaSynthMidiFileHandler`). Deux variantes mesurées, durée relue **du binaire
+SMF** (parseur indépendant) et des objets d'événements.
+
+| Variante | Principe | Verdict |
+|---|---|---|
+| **A** — `syncBpm` brut | réécrit les `TempoChangeEvent` au tick de chaque sync-point avec le `syncBpm` calculé par alphaTab | **NO-GO** : sur les segments de discontinuité (recul/bond audio) le `syncBpm` n'est pas un tempo — mesuré jusqu'à **2,5 tr/min**, parfois **≤ 0** ; tronqué à la sérialisation SMF (limite 3 octets ≈ 3,58 tr/min). |
+| **B** — règle de `mix-sync` | même chose, mais avec la **table de segments** de `js/mix-sync.js` (saut → pente du bloc destination, clamp `[0,5 ; 2]`) | **GO** : chaque **segment continu non clampé** dure exactement la durée audio visée — **14/14 < 0,5 %** ; BPM pré-cuits tous sains (50-190) ; binaire SMF identique aux objets. |
+
+**Faits établis :**
+1. La pré-cuisson est **exacte** : durée MIDI = portée audio des sync-points
+   (14/14). La stratégie C est donc **au moins aussi bonne** que l'application
+   actuelle du tempo par `playbackSpeed` (même table, même clamp), mais elle
+   **supprime par construction** les 405 coupures de synthé (RC-2) et l'oscillation
+   du correcteur (RC-3).
+2. Les segments « clamp » (`pente hors plage`) gardent l'écart **volontaire** de
+   `mix-sync` : identique à aujourd'hui, absorbé par le correcteur de dérive —
+   qui, lui, agit sur `playbackRate` de l'audio (jamais sur le synthé).
+3. **Donnée, pas bug** : la **couverture** des sync-points sur le MP3 complet
+   n'est > 99 % que sur **2/14**. AC/DC (67 %), Blink (67 %), Iron Maiden (57 %)
+   et F-Zero (3 %) ont des sync-points qui **s'arrêtent avant la fin du MP3** :
+   la transcription est plus courte que la piste audio. Cela affecte **autant** le
+   contrôleur actuel que C → hors périmètre de P2 (à documenter, P6).
+
+**Décision :** **stratégie C retenue**, avec la précision du §P2.5 (pré-cuire la
+table de `mix-sync`, **pas** le `syncBpm` brut). La loi « protège » (§P2.7) et le
+correcteur de dérive restent en filet de sécurité pour les segments clampés et
+les sauts.
+
+### 11.3 Commandes de vérification (état après P0 + P1)
+```
+node tools/load-smoke.js            # OK
+node tools/repeat-check.js          # OK — clés 94 -> 72
+node tools/tempo-correct-sim.js     # OK — coupures playbackSpeed = 405
+node tools/sync-audit.js            # OK — chemin livré, écrit.tempo = 405
+node tools/mix-sync-harness.js      # OK — tempoWrites 413 vs 405 (1,98 %), dérive croisière ~100 ms
+node tools/tempo-prebake-spike.js   # GO — variante B 14/14, variante A rejetée
 ```

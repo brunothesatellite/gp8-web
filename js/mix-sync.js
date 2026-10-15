@@ -1,10 +1,10 @@
 /* ==================================================================
-   GP8 PLAYER â€” js/mix-sync.js
-   4. MIX SYNC â€” SynthÃ© alphaTab (maÃ®tre du temps) + <audio> (esclave).
+   GP8 PLAYER — js/mix-sync.js
+   4. MIX SYNC — Synthé alphaTab (maître du temps) + <audio> (esclave).
    ------------------------------------------------------------------
-   ChargÃ© en <script classique> par index.html, dans l'ordre de l'ancien
+   Chargé en <script classique> par index.html, dans l'ordre de l'ancien
    app.js monolithique. Le partage se fait par les bindings lexicographiques
-   globaux (CFG, AT, $, safe, Player, Appâ€¦), PAS par des imports : un module
+   globaux (CFG, AT, $, safe, Player, App…), PAS par des imports : un module
    ES est impossible ici car l'application doit s'ouvrir depuis file://.
    ================================================================== */
 'use strict';
@@ -29,11 +29,21 @@
    *  segment. Comme on joue le MÊME fichier audio brut, l'axe temporel est
    *  identique à celui d'alphaTab → pas de dérive d'origine.
    *
-   *  Correction en cours de lecture :
-   *    |dérive| > 400 ms  → recale immédiat (seek)
-   *    25 ms < |dérive|   → ajustement fin de playbackRate (±10 %)
+   *  Correction en cours de lecture — loi RÉELLE (cf. constantes plus bas) :
+   *    |dérive| > 400 ms          → recale immédiat (seek)
+   *    100 ms ≤ |dérive| ≤ 400 ms → ajustement de playbackRate, au plus UNE
+   *                                 écriture toutes les 1500 ms (±10 %)
+   *    |dérive| < 100 ms          → ZONE MORTE : aucune écriture. L'écart
+   *                                 permanent se stabilise donc autour de
+   *                                 100 ms (mesuré sur le code réel par
+   *                                 tools/mix-sync-harness.js).
    *  `preservesPitch` étant actif par défaut, ces micro-variations de
    *  vitesse ne transposent PAS le son.
+   *
+   *  Tempo GP par segment : `playbackSpeed = userSpeed × 1/pente locale`.
+   *  Toute écriture de `playbackSpeed` re-échelle la position du synthé et le
+   *  COUPE le temps d'un seek (AlphaSynth.updatePlaybackSpeed → mainSeek) :
+   *  c'est le coût que la stratégie « tempo pré-cuit » (P2) supprime.
    */
   const MixSync = (() => {
     const HOLD_MS = 400;   // dérive au-delà de laquelle on recale d'un coup
@@ -199,9 +209,12 @@
       for (const p of points) p.speed = p.slope > 0 ? 1 / p.slope : 1;
 
       // Pente MOYENNE = tempo relatif enregistrement / partition (hors sauts).
-      // tempoScale = 1/penteMoy = ModifiedTempo/OriginalTempo : c'est le facteur
-      // dont alphaTab accélère le MIDI pour coller à l'enregistrement NATIF.
-      // Avec ça le <audio> reste à ~1,0× (pas de ralenti, pas de time-stretch).
+      // tempoScale = 1/penteMoy = ModifiedTempo/OriginalTempo : c'est le RAPPORT
+      // GLOBAL enregistrement/partition. Il n'est PAS appliqué tel quel : la
+      // lecture avance SEGMENT par SEGMENT via applyTempo (playbackSpeed =
+      // userSpeed × 1/pente locale). tempoScale ne sert que de valeur de repli
+      // et de journal (MixSync.info.tempoScale) ; l'audio, lui, reste à ~1,0×
+      // (pas de ralenti, pas de time-stretch).
       let sDa = 0, sDt = 0;
       for (let i = 0; i < n; i++) {
         const p = points[i], q = points[i + 1];
