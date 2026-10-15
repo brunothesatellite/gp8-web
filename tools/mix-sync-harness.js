@@ -276,7 +276,7 @@ console.log('');
 const hdr = ['fichier', 'points', 'saut', 'tempoWrites', 'REF P0', 'écart', 'rateWrites', 'seekWrites', 'dérive croisière', 'pic', 'stalls', 'simSec'];
 const lines = ['| ' + hdr.join(' | ') + ' |', '|' + hdr.map(() => '---').join('|') + '|'];
 
-let bad = 0, totalTempo = 0, totalRef = 0, totalRate = 0, totalSeek = 0, worstDrift = 0, worstMed = 0;
+let bad = 0, totalTempo = 0, totalRef = 0, totalRate = 0, totalSeek = 0, worstDrift = 0, worstMed = 0, totalSec = 0;
 
 for (const file of files) {
   const base = path.basename(file);
@@ -309,6 +309,7 @@ for (const file of files) {
     totalTempo += r.tempoWrites;
     totalRate += bench.c.rate;
     totalSeek += bench.c.seek;
+    totalSec  += r.steps * DT / 1000;
     worstDrift = Math.max(worstDrift, st.peakDrift);
     worstMed   = Math.max(worstMed, st.driftMed);
 
@@ -348,6 +349,13 @@ console.log('tempoWrites (total) : ' + totalTempo +
 console.log('rateWrites  (total) : ' + totalRate + '   seekWrites (total) : ' + totalSeek);
 console.log('dérive croisière (pire) : ' + worstMed + ' ms   (médiane des pics de fenêtre)');
 console.log('dérive pic (pire)       : ' + worstDrift + ' ms   (max, sauts volontaires inclus)');
+/* Seuils BUGFIX-TOTAL §6.3 : dérive croisière < 40 ms ; écritures de taux
+   ≤ 2 % du temps de lecture (le mp3 reste quasi natif). */
+if (worstMed >= 40) bad++;
+console.log('seuil dérive croisière < 40 ms : ' + (worstMed < 40 ? '✓' : '⚠ ÉCHEC'));
+const ratePct = totalSec > 0 ? (totalRate / totalSec) * 100 : 0;
+if (ratePct > 2) bad++;
+console.log('seuil écritures de taux ≤ 2 % du temps : ' + ratePct.toFixed(3) + ' % ' + (ratePct <= 2 ? '✓' : '⚠ ÉCHEC'));
 console.log('');
 console.log('LECTURE : tempoWrites = 0 est la CIBLE de P2 (tempo pré-cuit dans le MidiFile) ;');
 console.log('avant P2, c\'était le nombre de coupures du synthé (colonne « REF P0 » = valeur');

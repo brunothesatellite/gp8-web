@@ -382,13 +382,15 @@ augmentation des métriques `danger`/`jumps` ; non-régression sur les 12 autres
 fichiers à anacrouse ; aucune régression de synchro.
 
 ### P5 — Durcissement & non-régression
-12. Transformer `load-smoke`, `repeat-check`, `tempo-correct-sim`,
-    `mix-sync-harness`, `sync-audit` en **suite unique** `tools/test-all.js`
-    (sortie 0/1, testable en CI) avec seuils.
-13. Ajouter un **test d'intégration navigateur** optionnel (Playwright/Puppeteer)
-    qui charge chaque sample en `http://`, lit 10 s, et relit `[mix-stats]` +
-    `AudioContext` : vérifie 0 coupure et une dérive bornée. (Nécessite `npm i`
-    → à isoler du reste, le dépôt doit rester sans dépendance runtime.)
+12. ✅ `tools/test-all.js` **(fait — §11.6)** : exécute les 6 harnais, tableau
+    récapitulatif, sortie 0/1. Chaque harnais porte ses seuils
+    (`mix-sync-harness` : tempoWrites = 0, dérive croisière < 40 ms, écritures de
+    taux ≤ 2 % du temps).
+13. ⏳ **Différé** : test d'intégration navigateur (Playwright/Puppeteer). Il
+    exige `npm i` et sort du périmètre « dépôt sans dépendance à l'exécution » ;
+    il sera fourni comme script isolé, à installer à part. Les harnais
+    déterministes ci-dessus couvrent la logique ; l'oreille (P6 §7) couvre le
+    rendu.
 **Sortie :** suite verte sur les 14 échantillons ; `tools/test-all.js` en une
 commande.
 
@@ -675,3 +677,23 @@ node tools/sync-audit.js            # OK — chemin livré, écrit.tempo = 405
 node tools/mix-sync-harness.js      # OK — tempoWrites 0/14, dérive croisière ≤ 11 ms
 node tools/tempo-prebake-spike.js   # OK — pré-cuisson livrée, 14/14 < 0,5 %
 ```
+
+### 11.6 P5 — suite unique *(fait)*
+`tools/test-all.js` **(nouveau)** exécute les 6 harnais en sous-processus et sort
+**0/1** (0 si tout est vert). Chaque harnais garde SON critère :
+
+| Harnais | Critère de sortie |
+|---|---|
+| `load-smoke` | ordre des scripts + bindings présents + `App.boot`/`Samples.build` |
+| `repeat-check` | aucune régression (clés GPIF, `danger`, `jumps`) |
+| `tempo-correct-sim` | loi « protège » : `P ≤ A` (recadrages + écritures) |
+| `sync-audit` | chemin livré, `écrit.tempo` = 405 (référence P0) |
+| `tempo-prebake-spike` | fidélité pré-cuisson : 14/14 segments < 0,5 % |
+| `mix-sync-harness` | **tempoWrites = 0**, dérive croisière < 40 ms, taux ≤ 2 % du temps |
+
+```
+node tools/test-all.js              # RESULTAT : OK — 6/6 harnais verts
+```
+
+Le test navigateur (Playwright) reste **différé** : il exige `npm i`, hors du
+périmètre « dépôt sans dépendance à l'exécution ».
