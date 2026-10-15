@@ -6,6 +6,16 @@
    navigateur, pour arbitrer la LOI DE COMMANDE du correcteur (RC-3,
    BUGMP3 §14). Trois lois comparées sur le MÊME pont :
 
+   ⚠ MODÈLE PRÉ-P2. Depuis BUGFIX-TOTAL P2, le tempo GP n'est plus appliqué
+     par `playbackSpeed` en lecture : il est PRÉ-CUIT dans le MidiFile
+     (`MixSync.prebake`) et la lecture ne touche plus à `playbackSpeed`
+     (0 coupure). Ce simulateur conserve l'ANCIEN moteur (`applyTempo`) comme
+     référence historique de P0/P1 — la colonne « tempo » y compte donc les
+     coupures d'AVANT, que la pré-cuisson a supprimées. Ce qui reste valable
+     ici : l'arbitrage de la LOI « protège » sur les écritures de
+     playbackRate, qui, lui, est toujours livré. La lecture RÉELLE est
+     vérifiée par tools/mix-sync-harness.js (tempoWrites = 0, dérive ≤ 15 ms).
+
      actuel   code livré : dans la bande morte (|dérive| < 100 ms) on ne
               fait RIEN → le taux biaisé de la dernière écriture (± 5 %)
               reste appliqué au mp3, et la dérive repart dans l'autre sens
@@ -236,7 +246,8 @@ for (const f of files) {
 }
 console.log('-'.repeat(104));
 console.log('écritures de taux TOTALES : actuel ' + tA + ' -> naïf ' + tN + ' -> protège ' + tP +
-            '   (coupures playbackSpeed = ' + tTempo + ', inchangées : RC-2)');
+            '   (coupures playbackSpeed = ' + tTempo + ' — MODÈLE PRÉ-P2 : supprimées par la' +
+            ' pré-cuisson du tempo, voir mix-sync-harness)');
 console.log(bad === 0
   ? "RESULTAT : OK - la loi « protege » n'ajoute ni recadrage ni coupure"
   : 'RESULTAT : ' + bad + ' ANOMALIE(S)');

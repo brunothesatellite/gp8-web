@@ -21,7 +21,8 @@
       countInOn: false,
       playing: false,
       loopOn: false,
-      userSpeed: 1.0,      // vitesse utilisateur (× tempoScale → playbackSpeed)
+      userSpeed: 1.0,      // vitesse utilisateur (seule écriture de playbackSpeed)
+      midiTempo0: null,    // 1er tempo du MIDI PRÉ-CUIT (base de l'overlay de décompte)
       loopRange: null,       // plage A→B en cours (modèle local = vérité)
       currentBar: 0,
       externalReady: false,
@@ -120,6 +121,7 @@
     function init(container) {
       createMix();                   // modèle de mixage vide, dispo tout de suite
       installRepeatNormalization();  // AVANT toute génération MIDI/synchro
+      installTempoPrebake();         // tempo de l'enregistrement écrit dans le MIDI
       S.api = new alphaTab.AlphaTabApi(container, CFG.alphatab);
       /* `api.player` renvoie NULL tant que `_player.instance` n'est pas prêt
          (l.46264) : on cible l'objet interne `api._player`, le
@@ -212,6 +214,7 @@
         nLayout = 0; nPaint = 0;
         trace('scoreLoaded', `${score.tracks.length} pistes · ${score.masterBars.length} mesures`);
         S.score = score;
+        S.midiTempo0 = null;            // relevé à la génération du MIDI pré-cuit
         fixEmptyAnacrusis(score);       // mesures vides/pickup remises sur la timeline
         /* NB : deux interventions sur les répétitions, et TOUTES deux dictées
            par le .gp lui-même (voir BUGRENVOI.md / BUGMP3 §14) :
@@ -480,14 +483,19 @@
       S.api.countInVolume = S.countInOn ? S.metronomeVolume : 0;
     }
     /* base du compte à rebours visuel : alphaTab génère le count-in avec
-     * `tempoChanges[0].tempo` (l.35368) et le nombre de temps de la
-     * signature (l.35130), puis le joue au `playbackSpeed` courant. */
+     * `tempoChanges[0].tempo` (l.35368) — le 1er tempo du MIDI PRÉ-CUIT, relevé
+     * par installTempoPrebake (`S.midiTempo0`) — et le nombre de temps de la
+     * signature (l.35130), puis le joue au `playbackSpeed` courant (désormais
+     * la simple vitesse utilisateur). On suit le tempo RÉELLEMENT joué : sinon
+     * l'overlay dériverait du décompte sonore. */
     function countInBeats() {
       const mb = S.score && S.score.masterBars[0];
       return (mb && mb.timeSignatureNumerator > 0) ? mb.timeSignatureNumerator : 4;
     }
     function countInBeatMs() {
-      const bpm = S.score && isFinite(S.score.tempo) && S.score.tempo > 0 ? S.score.tempo : 120;
+      const bpm = (S.midiTempo0 && isFinite(S.midiTempo0) && S.midiTempo0 > 0)
+        ? S.midiTempo0
+        : (S.score && isFinite(S.score.tempo) && S.score.tempo > 0 ? S.score.tempo : 120);
       const sp  = S.api && isFinite(S.api.playbackSpeed) && S.api.playbackSpeed > 0 ? S.api.playbackSpeed : 1;
       return 60000 / (bpm * sp);
     }
@@ -661,6 +669,66 @@
       }
     }
 
+    /* ============ TEMPO PRÉ-CUIT (stratégie C, BUGFIX-TOTAL P2) =========
+       `loadMidiForScore()` génère le MidiFile du score puis le passe au
+       lecteur : `MidiFileGenerator.generate()` → `player.loadMidiFile(midi)`.
+       On s'intercale SUR LA MÉTHODE DE GÉNÉRATION : une fois le fichier MIDI
+       produit et les points de synchro calculés (même passe), on RÉÉCRIT ses
+       `TempoChangeEvent` selon la règle de segment de MixSync — LA MÊME table
+       que le pont audio (`segmentsFrom`). Le lecteur joue alors la partition
+       au tempo de l'enregistrement avec `playbackSpeed = 1` : plus aucune
+       écriture de `playbackSpeed` en lecture (RC-2/RC-3 supprimés à la
+       source). Guardé sur l'audio embarqué : sans lui, aucun changement.
+
+       Enveloppe de PROTOTYPE (comme la normalisation des renvois) : elle
+       s'applique à toutes les générations, y compris une re-génération après
+       `updateSettings`. Jamais d'exception : échec → on continue. */
+    function installTempoPrebake() {
+      try {
+        const MFG = alphaTab.midi && alphaTab.midi.MidiFileGenerator;
+        if (!MFG || !MFG.prototype || MFG.prototype.__gp8Prebake) return;
+        const orig = MFG.prototype.generate;
+        MFG.prototype.generate = function () {
+          const r = orig.apply(this, arguments);
+          try {
+            const h = this._handler;
+            const midiFile = h && h._midiFile;
+            const sp = this.syncPoints;
+            if (midiFile && sp && sp.length && hasEmbeddedAudio(this._score)) {
+              const n = MixSync.prebake(midiFile,
+                sp.map(p => ({ tick: p.synthTick, t: p.synthTime, a: p.syncTime })),
+                h.tickShift);
+              trace('tempo', n + ' tempo(s) pré-cuit(s)');
+              /* CURSEUR ANIMÉ. alphaTab ancre le curseur sur
+                 `modifiedTempo / originalTempo` (`syncBpm × playbackSpeed` sur
+                 le tempo courant du MIDI). Avant P2, `originalTempo` était le
+                 tempo NOTÉ et `syncBpm` compensait l'écart audio : le rapport
+                 était faussé par la pente. Maintenant que le MIDI EST au tempo
+                 de l'enregistrement, plus aucune compensation n'est à faire :
+                 on pose `syncBpm = synthBpm` (« aucun tempo modifié »), et le
+                 rapport redevient exact. `updateSyncPoints` (appelé juste après
+                 par `loadMidiForScore`, même tableau) reçoit ces points. */
+              for (const p of sp) if (p.synthBpm > 0) p.syncBpm = p.synthBpm;
+              /* 1er tempo du MIDI pré-cuit : base de l'overlay du décompte
+                 (alphaTab génère le count-in avec `tempoChanges[0]`). */
+              const TT = (alphaTab.midi.MidiEventType || {}).TempoChange;
+              let first = null;
+              for (const tr of midiFile.tracks) for (const e of tr.events) {
+                if (e.type === TT && e.beatsPerMinute > 0 && (!first || e.tick < first.tick)) first = e;
+              }
+              S.midiTempo0 = first ? first.beatsPerMinute : null;
+            }
+          } catch (e) {
+            console.warn('[tempo] pré-cuisson impossible', e);
+          }
+          return r;
+        };
+        MFG.prototype.__gp8Prebake = true;
+      } catch (e) {
+        console.warn('[tempo] installation de la pré-cuisson impossible', e);
+      }
+    }
+
     /* Remplit le modèle avec les niveaux d'origine SANS toucher aux canaux
        (alphaTab les met déjà à jour lui-même sur `readyForPlayback`). */
     function seedMixVolumes() {
@@ -683,8 +751,8 @@
         if (S.score !== score) return;          // un autre fichier a pris le relais
         const t0 = performance.now();
         if (hasEmbeddedAudio(score)) {
-          MixSync.build(score);                 // pont synthTime → syncTime
-          applySpeed();                         // tempoScale → MIDI au modified tempo
+          MixSync.build(score);                 // pont axe pré-cuit → axe audio
+          applySpeed();                         // vitesse utilisateur (playbackSpeed)
           ensureMixAudio();                     // branche le <audio> (async, sans toast)
           MixSync.onState(S.api && S.api.playerState);
         }
@@ -948,11 +1016,12 @@
     }
     function setSpeed(pct) { S.userSpeed = pct > 0 ? pct : 1; applySpeed(); }
 
-    /* Tempo INTÉGRAL (BUGMP3 §13) : le MIDI suit l'enregistrement segment par
-       segment (tempo variable GP). Le moteur de tempo vit dans MixSync —
-       indexé sur son horloge musicale intégrée (∫ speed·dt), donc correct
-       aussi quand la vitesse change en cours de route. Sans audio embarqué ni
-       points de synchro, MixSync retombe sur le simple userSpeed. */
+    /* TEMPO PRÉ-CUIT (stratégie C) : le tempo de l'enregistrement est écrit
+       dans le MidiFile (installTempoPrebake) — le synthé joue donc la
+       partition au bon tempo SANS que l'on touche `playbackSpeed`. Cette
+       fonction ne transmet plus que la VITESSE UTILISATEUR (1,0× = natif),
+       seul écrivain de `playbackSpeed` avec le geste humain. Sans audio
+       embarqué, MixSync retombe sur le simple userSpeed. */
     function applySpeed() {
       MixSync.setUserSpeed(S.userSpeed);
     }

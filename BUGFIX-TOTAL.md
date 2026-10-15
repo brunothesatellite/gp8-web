@@ -333,26 +333,35 @@ durée MP3 brute — la durée du MP3 mesure la *couverture* des sync-points du
 non clampé** < 0,5 % sur 14/14, BPM pré-cuits tous ≥ 3,58 tr/min (limite SMF).
 Document de décision : §11.
 
-### P2 — Implémenter la stratégie C *(cœur du correctif)*
-5. `js/player.js` : patcher l'instance `api` (comme `patchVendorMidiInfo`) pour
-   que `loadMidiForScore()` charge le MIDI **à tempo pré-cuit** ; conserver
-   `updateSyncPoints` pour l'UI/cursor.
+### P2 — Implémenter la stratégie C *(cœur du correctif)* ✅ fait — voir §11.4
+5. **Injection retenue :** enveloppe de `MidiFileGenerator.prototype.generate`
+   (`installTempoPrebake`, `js/player.js`) — le `MidiFile` est encore en mémoire
+   (`this._handler._midiFile`) et les points de synchro viennent d'être calculés
+   dans **la même passe** ; `loadMidiForScore()` le passe ensuite tel quel à
+   `player.loadMidiFile()`. (Écarté : patcher `api.loadMidiForScore`, qui
+   duplique la mécanique interne `ModelUtils`/`_tickShift`/`_onMidiLoad`.)
+   `updateSyncPoints` reste appelé (UI/curseur). Garde sur l'audio embarqué :
+   un `.gp5` sans MP3 garde le tempo noté.
    ⚠ **Ne PAS** pré-cuire le `syncBpm` brut (spike §11 : il descend à 2,5 tr/min
-   ou devient négatif sur les segments de discontinuité). Pré-cuire la **table
-   de segments de `mix-sync`** (mêmes `points[].slope`/`speed` : détection de
-   saut → pente du bloc destination, clamp `[0,5 ; 2]`). Factoriser
-   `analyzeSegments` pour que `mix-sync` et la génération partagent **la même**
-   table (fin du miroir).
-6. `js/mix-sync.js` : **supprimer** `applyTempo` du chemin de lecture ; garder
-   `speedAt` pour la génération ; `setUserSpeed` n'écrit `playbackSpeed`
-   **qu'au chargement et au geste utilisateur**.
-7. Appliquer la **loi « protège »** dans la zone morte (l.482) : remise au neutre
-   si elle rapproche du taux natif ; sinon silence.
-8. Traiter D7 : retirer `initialSpeed` mort ou l'utiliser ; documenter/retirer le
-   clamp `Math.max(0, …)` ; corriger `countInBeatMs`.
+   ou devient négatif sur les segments de discontinuité). On pré-cuit la **table
+   de segments de `mix-sync`** (mêmes `points[].notSlope` : détection de saut →
+   pente du bloc destination, clamp `[0,5 ; 2]`). `segmentsFrom()` est **la**
+   table partagée par `prebake` et le pont (fin du miroir).
+6. `js/mix-sync.js` : **`applyTempo` supprimé** du chemin de lecture ;
+   `setUserSpeed` n'écrit `playbackSpeed` **qu'au chargement et au geste
+   utilisateur** (et seulement si la valeur change, pour ne pas couper le
+   synthé). Le pont est ré-indexé sur l'**axe pré-cuit** (`points[].t`).
+7. **Loi « protège »** appliquée dans la zone morte (remise au neutre si elle
+   rapproche du taux natif ; sinon silence) — arbitrée par `tempo-correct-sim`.
+8. D7 traité : `initialSpeed`/`speedAt`/`speed` morts retirés ; le clamp
+   `Math.max(0, …)` de `targetSeconds` **retiré** au profit d'une gestion
+   explicite du **pré-roll** (notation démarrant avant l'audio, `syncTime < 0`) ;
+   `countInBeatMs` base sur le **1er tempo du MIDI pré-cuit** (`S.midiTempo0`).
 **Sortie :** `mix-sync-harness` → **0 écriture `playbackSpeed` en lecture** sur
 les 14 échantillons ; écritures `playbackRate` ≤ 2 % du temps ; dérive pic
 < 40 ms.
+**Résultat (14/14)** : tempoWrites **0**, dérive croisière **≤ 11 ms** (médiane
+des pics), 8 écritures de taux au total. ✅
 
 ### P3 — RC-1 résiduel *(précision des sauts)*
 9. Instrumenter `barOccurrence` : pour AC/DC et Renaud, comparer les clés GPIF
@@ -405,23 +414,29 @@ livré**. Les constantes/formules ne doivent exister qu'à **un seul endroit**
 |---|---|---|
 | `tools/load-smoke.js` *(existant)* | les 8 `js/*.js` | ordre des scripts, bindings, `App.boot`/`Samples.build` → OK |
 | `tools/repeat-check.js` *(existant)* | `js/repeat-oracle.js` réel + `fixEmptyAnacrusis`/`normalizeMultiClosingRepeats` extraits | clés GPIF manquantes, `danger`, `jumps` : **non-régression** + gains de référence |
-| `tools/tempo-correct-sim.js` *(existant)* | `repeat-oracle` réel, simulation des 3 lois | écritures rate (A/N/P), étirement, recadrages : **P ≤ A** |
+| `tools/tempo-correct-sim.js` *(existant)* | `repeat-oracle` réel, simulation des 3 lois — **modèle PRÉ-P2** (référence historique + arbitrage de la loi « protège » sur `playbackRate`) | écritures rate (A/N/P), étirement, recadrages : **P ≤ A** |
 | `tools/mix-sync-harness.js` **(à créer — P0)** | **`js/mix-sync.js` réel** | `nTempoLecture` (doit = **0** après P2), `nRate`, `nSeek`, dérive pic, `tempo hors plage` |
 | `tools/sync-audit.js` *(à refondre — P0)* | chemin réel | recadrages/glitchs/sauts par fichier, points GPIF couverts |
 | `tools/test-all.js` **(à créer — P5)** | tous ci-dessus | sortie 0/1 + tableau récapitulatif |
 
 ### 6.3 Assertions cibles (après P2)
-| Assertion | Seuil |
-|---|---|
-| Écritures `playbackSpeed` en lecture (hors geste utilisateur) | **0** sur les 14 |
-| Écart durée MIDI pré-cuit ↔ durée MP3 | **< 1 %** |
-| Dérive MP3↔MIDI pic (mix, simulation) | **< 40 ms** |
-| Écritures `playbackRate` | **≤ 2 % du temps de lecture** |
-| Recadrages « glitch » (dérive dans un bloc continu) | **0** |
-| Recadrages « sauts » (discontinuités D.S./Coda) | **= 1 par discontinuité** |
-| Clés GPIF manquantes | **0** (ou documentées H2) |
-| Pentes hors clamp `[0,5 ; 2]` | **0** |
-| `mix-sync-harness` reproduit `tempo-correct-sim` | ±2 % |
+| Assertion | Seuil | État P2 |
+|---|---|---|
+| Écritures `playbackSpeed` en lecture (hors geste utilisateur) | **0** sur les 14 | ✅ 0/14 |
+| Écart durée MIDI pré-cuit ↔ **portée audio des sync-points** (par segment continu non clampé) | **< 0,5 %** | ✅ 14/14 (pire 0,160 %) |
+| Dérive croisière MP3↔MIDI (médiane des pics de fenêtre) | **< 40 ms** | ✅ ≤ 11 ms |
+| Dérive pic | = taille du saut (1 seek) ; pas un « glitch » | ✅ sauts uniquement |
+| Écritures `playbackRate` | **≤ 2 % du temps de lecture** | ✅ 8 écritures au total |
+| Recadrages « glitch » (dérive dans un bloc continu) | **0** | ✅ 0 |
+| Recadrages « sauts » (discontinuités D.S./Coda) | **= 1 par discontinuité** | ✅ |
+| Clés GPIF manquantes | **0** (ou documentées H2) | ⏳ P3 |
+| Pentes hors clamp `[0,5 ; 2]` | **0** | ⏳ P3 |
+
+> ⚠ La cible initiale « écart durée MIDI ↔ **durée MP3** < 1 % » est **fausse** :
+> la portée des sync-points est plus courte que le MP3 sur 12/14 fichiers
+> (donnée de fichier, cf. §11.2.3). La bonne référence est la **portée audio des
+> sync-points**. `tempo-correct-sim` n'est plus la référence de `playbackSpeed`
+> (modèle pré-P2) : c'est `mix-sync-harness` qui l'est.
 
 ### 6.4 Diagnostics obligatoires en console (déjà partiels, à compléter)
 - `[mix] N point(s) de synchro · X saut(s) · Y pente(s) hors plage`
@@ -429,7 +444,7 @@ livré**. Les constantes/formules ne doivent exister qu'à **un seul endroit**
 - `[mix-stats]` toutes les 5 s : `playbackSpeed écriture/s` (**doit = 0**),
   `playbackRate écriture/s`, `seek/s`, `arrêts maître`, `dérive max`.
 - `[oracle] N groupe(s) relevé(s) … clés manquantes a → b`.
-- `[tempo] pré-cuit : N segments · durée MIDI vs MP3` (nouveau, P2).
+- `[tempo] N tempo(s) pré-cuit(s)` (nouveau, P2 — via `trace`).
 
 ---
 
@@ -606,4 +621,57 @@ node tools/tempo-correct-sim.js     # OK — coupures playbackSpeed = 405
 node tools/sync-audit.js            # OK — chemin livré, écrit.tempo = 405
 node tools/mix-sync-harness.js      # OK — tempoWrites 413 vs 405 (1,98 %), dérive croisière ~100 ms
 node tools/tempo-prebake-spike.js   # GO — variante B 14/14, variante A rejetée
+```
+
+### 11.4 P2 — stratégie C implémentée *(fait)*
+
+**Ce qui a changé**
+
+| Fichier | Changement |
+|---|---|
+| `js/mix-sync.js` | `segmentsFrom(raw)` = **table de segments pure et partagée** (axe pré-cuit `t`, axe audio `a`, `notSlope` partition clampée, `slope` pré-cuite clampée, sauts) ; `build(score)` l'utilise ; **`prebake(midiFile, raw, tickShift)`** écrit le tempo pré-cuit (retire tous les `TempoChangeEvent`, repose `tempoNatif / notSlope` par point) ; **`applyTempo` supprimé** ; `setUserSpeed` = seul écrivain de `playbackSpeed` (chargement + geste, si la valeur change) ; **loi « protège »** dans la zone morte ; pont ré-indexé sur l'axe pré-cuit ; **pré-roll** explicite (`syncTime < 0` → audio tenu à 0, à l'arrêt) ; `initialSpeed`/`speedAt`/`speed` morts retirés. |
+| `js/player.js` | **`installTempoPrebake()`** : enveloppe de `MidiFileGenerator.prototype.generate` (appelée en `init`, comme la normalisation des renvois) → après génération, `MixSync.prebake(this._handler._midiFile, this.syncPoints, this._handler.tickShift)`, **gardé sur l'audio embarqué** ; relève `S.midiTempo0` (1er tempo pré-cuit) ; `countInBeatMs` s'appuie dessus. |
+| `tools/mix-sync-harness.js` | Critère de sortie **tempoWrites = 0** ; modèle `vm` fidèle (le `<audio>` **ne bouge pas** à l'arrêt → pré-roll silencieux) ; sonde `MixSync._probe` + `--trace`. |
+| `tools/tempo-prebake-spike.js` | La variante B **exécute `MixSync.prebake`/`segmentsFrom` livrés** (plus de miroir) et **relit le MidiFile produit** pour comparer ses durées à la table du pont. |
+| `tools/tempo-correct-sim.js` | Marqué **modèle PRÉ-P2** (référence historique P0/P1 + arbitrage de la loi « protège » sur `playbackRate`). |
+
+**Résultat `node tools/mix-sync-harness.js` (14/14)**
+
+| Métrique | Avant P2 | Après P2 |
+|---|---|---|
+| écritures `playbackSpeed` (coupures du synthé) | 405 | **0** |
+| dérive croisière (médiane des pics de fenêtre) | ~100 ms (13/14) | **≤ 11 ms** (14/14) |
+| écritures `playbackRate` (total) | 550 | **8** |
+
+- **RC-2 supprimé à la source** : le tempo de l'enregistrement vit dans le
+  `MidiFile` (`prebake`), la lecture ne touche plus jamais à `playbackSpeed`.
+- **RC-3 supprimé** : la dérive de croisière tombe sous la zone morte au lieu de
+  s'y stabiliser.
+- **Pré-roll** (défaut D7) : la notation démarre parfois **avant** le fichier
+  audio (1er `syncTime` < 0 : AC/DC −1014 ms, Blink −565 ms). L'audio est
+  désormais **tenu à 0, à l'arrêt** pendant ce pré-roll, au lieu d'avancer puis
+  d'être recadré par un seek (ce qui laissait un résidu permanent — c'est ce que
+  le clamp `Math.max(0, …)` masquait).
+- **Fidélité de la pré-cuisson** (`tempo-prebake-spike`, code livré) : écart
+  par segment continu non clampé **< 0,5 % sur 14/14** (pire 0,160 %), tempo
+  pré-cuit minimal 50 tr/min (aucun tempo ≤ 0), binaire SMF = objets.
+- **Curseur animé d'alphaTab** (défaut latent corrigé au passage) : il ancre
+  sa durée sur `modifiedTempo / originalTempo` (`syncBpm × playbackSpeed` sur le
+  tempo courant). Avant P2, `originalTempo` était le tempo NOTÉ et `syncBpm`
+  compensait l'écart audio → le rapport était faussé par la pente. Maintenant
+  que le MIDI EST au tempo de l'enregistrement, `installTempoPrebake` pose
+  `syncBpm = synthBpm` (« aucun tempo modifié ») : le rapport redevient exact.
+
+**Reste (P3+)** : la couverture des sync-points sur le MP3 complet (donnée de
+fichier, 2/14), les **sauts** (Renaud 8, ACDC 3, Iron Maiden 3) — un seul seek
+chacun, taille = celle du saut voulu — et le RC-1 résiduel (`barOccurrence`).
+
+### 11.5 Commandes de vérification (état après P0 + P1 + P2)
+```
+node tools/load-smoke.js            # OK
+node tools/repeat-check.js          # OK — clés 94 -> 72
+node tools/tempo-correct-sim.js     # OK — modèle PRÉ-P2 (référence historique)
+node tools/sync-audit.js            # OK — chemin livré, écrit.tempo = 405
+node tools/mix-sync-harness.js      # OK — tempoWrites 0/14, dérive croisière ≤ 11 ms
+node tools/tempo-prebake-spike.js   # OK — pré-cuisson livrée, 14/14 < 0,5 %
 ```

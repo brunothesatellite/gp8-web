@@ -15,14 +15,15 @@
                   (`BackingTrackSyncPoint.updateSyncBpm`) — c'est le
                   prototype littéral du plan.
      VARIANTE B : même chose, mais avec la règle de SEGMENT de js/mix-sync.js
-                  (détection de saut, clamp de pente, pente du bloc
-                  destination) — le tempo effectivement appliqué aujourd'hui
-                  via `playbackSpeed`, mais PRÉ-CUIT.
+                  — désormais EXÉCUTÉE TEL QUEL (`MixSync.prebake`, qui est le
+                  code livré en P2 ; `MixSync.segmentsFrom` donne la table du
+                  pont). Le spike ne recopie plus la règle : il VÉRIFIE que le
+                  MidiFile produit porte les durées de la table du pont.
 
    Mesures : durée totale (objets d'événements ET relecture du binaire SMF),
    BPM minimal (un `syncBpm` brut peut tomber sous 3,58 tr/min — que le SMF
    tronque sur 3 octets), et, pour B, l'écart par segment continu entre la
-   durée MIDI et la durée audio visée.
+   durée RÉELLE du MidiFile pré-cuit et la durée audio visée par le pont.
 
    Usage :  node tools/tempo-prebake-spike.js
             node tools/tempo-prebake-spike.js --gp <fich>
@@ -164,65 +165,76 @@ function bakeRaw(midi, handler, syncPoints) {
   return { n, minBpm, nBad };
 }
 
-/* ---- règle de SEGMENT de js/mix-sync.js (analyzeSegments, l.166-199) --
-   MIROIR assumé (spike exploratoire ; P2 factorisera cette analyse pour
-   que mix-sync et la génération partagent LA MÊME table).               */
-const JUMP_SLOPE = 3.0, SLOPE_MIN = 0.5, SLOPE_MAX = 2.0;
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-function analyzeSegments(pts) {
-  const dedup = [];
-  for (const p of pts) { while (dedup.length && p.t <= dedup[dedup.length - 1].t) dedup.pop(); dedup.push(p); }
-  const n = dedup.length;
-  for (let i = 0; i < n; i++) {
-    const p = dedup[i], q = dedup[i + 1];
-    if (!q) { p.jump = false; p.slope = 1; p.rawSlope = 1; continue; }
-    const dt = q.t - p.t, da = q.a - p.a;
-    p.rawSlope = dt > 0 ? da / dt : 1;
-    p.jump = (da < 0) || (p.rawSlope < 1 / JUMP_SLOPE) || (p.rawSlope > JUMP_SLOPE);
-    p.slope = clamp(p.rawSlope, SLOPE_MIN, SLOPE_MAX);
+/* ---- CODE LIVRÉ : js/mix-sync.js chargé TEL QUEL (banc, pas miroir) ----
+   `MixSync.prebake` écrit le tempo pré-cuit dans le MidiFile et
+   `MixSync.segmentsFrom` expose LA table de segments partagée avec le pont
+   (axe pré-cuit `t`, axe audio `a`). Le spike ne RECOPIE plus la règle : il
+   VÉRIFIE que le MidiFile réellement produit porte bien les durées de la
+   table du pont. */
+const vm = require('vm');
+function loadMixSync() {
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'mix-sync.js'), 'utf8');
+  const sandbox = {
+    console,
+    alphaTab: at,
+    clamp: (v, a, b) => Math.min(b, Math.max(a, v)),
+    performance: { now: () => 0 },
+    AT: {}, AudioSync: { element: null }, Player: { S: { api: null } }, App: {}, Promise
+  };
+  sandbox.globalThis = sandbox;
+  const ctx = vm.createContext(sandbox);
+  new vm.Script(src, { filename: 'js/mix-sync.js' }).runInContext(ctx, { timeout: 5000 });
+  const M = vm.runInContext('MixSync', ctx);
+  if (!M || typeof M.prebake !== 'function' || typeof M.segmentsFrom !== 'function') {
+    throw new Error('MixSync.prebake/segmentsFrom absents (js/mix-sync.js non livré ?)');
   }
-  for (let i = n - 1; i >= 0; i--) if (dedup[i].jump) dedup[i].slope = (i + 1 < n) ? dedup[i + 1].slope : 1;
-  for (const p of dedup) p.speed = p.slope > 0 ? 1 / p.slope : 1;
-  return dedup;
+  return M;
 }
-function tempoLookup(midi) {
-  const evs = midi.tracks[0].events.filter(e => e.type === TEMPO_TYPE).sort((a, b) => a.tick - b.tick);
-  return tick => { let b = 120; for (const e of evs) { if (e.tick <= tick && e.beatsPerMinute > 0) b = e.beatsPerMinute; else if (e.tick > tick) break; } return b; };
-}
+const MixSync = loadMixSync();
+const SLOPE_MIN = 0.5, SLOPE_MAX = 2.0;
 
-/* ---- VARIANTE B : règle de segment mix-sync, pré-cuite -------------- */
+/* ---- VARIANTE B : tempo pré-cuit par le CODE LIVRÉ ------------------ */
+function midiTimeAtTick(midi, tick) {
+  const div = midi.division || 960;
+  const evs = midi.tracks[0].events.filter(e => e.type === TEMPO_TYPE && e.beatsPerMinute > 0)
+    .sort((a, b) => a.tick - b.tick);
+  let bpm = 120, t = 0, acc = 0;
+  for (const e of evs) {
+    if (e.tick > tick) break;
+    if (e.tick > t) { acc += (e.tick - t) * (60000 / (bpm * div)); t = e.tick; }
+    bpm = e.beatsPerMinute;
+  }
+  if (tick > t) acc += (tick - t) * (60000 / (bpm * div));
+  return acc;
+}
 function bakeMixRule(midi, handler, gen) {
   const sp = gen.syncPoints || [];
-  const nativeAt = tempoLookup(midi);
-  const segs = analyzeSegments(sp.map(s => ({ t: s.synthTime, a: s.syncTime, tick: s.synthTick })));
-  stripTempos(midi);
-  let minBpm = Infinity, nBad = 0;
-  for (const s of segs) {
-    const bpm = nativeAt(s.tick + handler.tickShift) * s.speed;
-    if (!(bpm > 0)) { nBad++; continue; }
-    addTempo(midi, s.tick + handler.tickShift, bpm);
-    if (bpm < minBpm) minBpm = bpm;
-  }
-  /* Fidélité de la pré-cuisson : sur les segments CONTINUS **non clampés**
-     (pente brute dans [0,5 ; 2]), la durée MIDI pré-cuite doit égaler la
-     durée audio visée. On exclut les segments clampés : leur écart est la
-     limite VOLONTAIRE de mix-sync (même clamp aujourd'hui), pas un défaut
-     de la pré-cuisson. */
-  let worst = 0, nCont = 0, nClamp = 0;
-  for (let i = 0; i < segs.length - 1; i++) {
-    const p = segs[i], q = segs[i + 1];
-    if (p.jump) continue;
-    const dSync = q.a - p.a;
-    if (!(dSync > 0)) continue;
-    if (p.rawSlope < SLOPE_MIN || p.rawSlope > SLOPE_MAX) { nClamp++; continue; }
-    const bpm = nativeAt(p.tick + handler.tickShift) * p.speed;
-    const dur = (q.tick - p.tick) * (60000 / (bpm * (midi.division || 960)));
-    const err = Math.abs(dur - dSync) / dSync;
+  const raw = sp.map(s => ({ tick: s.synthTick, t: s.synthTime, a: s.syncTime }));
+  const n = MixSync.prebake(midi, raw, handler.tickShift);    // ← CODE LIVRÉ
+  const seg = MixSync.segmentsFrom(raw);                      // ← table du PONT
+  const pts = seg.points;
+
+  /* Fidélité RÉELLE : on RELIT le MidiFile pré-cuit et on compare sa DURÉE
+     au temps pré-cuit de la table du pont, segment par segment CONTINU NON
+     clampé (pente brute dans [0,5 ; 2]). Les segments clampés gardent l'écart
+     VOLONTAIRE de mix-sync (même clamp aujourd'hui) ; les sauts sont re-ancreés. */
+  const shift = handler.tickShift || 0;
+  let worst = 0, nCont = 0, nClamp = 0, minBpm = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[i + 1];
+    if (!q || p.jump) continue;
+    const dA = q.a - p.a;
+    if (!(dA > 0)) continue;
+    if (p.rawNot < SLOPE_MIN || p.rawNot > SLOPE_MAX) { nClamp++; continue; }
+    const dMid = midiTimeAtTick(midi, q.tick + shift) - midiTimeAtTick(midi, p.tick + shift);
+    const err = Math.abs(dMid - dA) / dA;
     if (err > worst) worst = err;
     nCont++;
   }
-  return { n: segs.length, minBpm, nBad, worst, nCont, nClamp,
-           nJump: segs.filter(s => s.jump).length };
+  for (const e of midi.tracks[0].events) {
+    if (e.type === TEMPO_TYPE && e.beatsPerMinute > 0 && e.beatsPerMinute < minBpm) minBpm = e.beatsPerMinute;
+  }
+  return { n, minBpm, nBad: 0, worst, nCont, nClamp, nJump: seg.nJump };
 }
 
 /* ---- durée par les OBJETS d'événements ----------------------------- */

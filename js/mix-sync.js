@@ -33,17 +33,27 @@
    *    |dérive| > 400 ms          → recale immédiat (seek)
    *    100 ms ≤ |dérive| ≤ 400 ms → ajustement de playbackRate, au plus UNE
    *                                 écriture toutes les 1500 ms (±10 %)
-   *    |dérive| < 100 ms          → ZONE MORTE : aucune écriture. L'écart
-   *                                 permanent se stabilise donc autour de
-   *                                 100 ms (mesuré sur le code réel par
-   *                                 tools/mix-sync-harness.js).
+   *    |dérive| < 100 ms          → ZONE MORTE : loi « protège » (remise au
+   *                                 neutre si elle rapproche du taux natif,
+   *                                 sinon silence) — arbitrée par
+   *                                 tools/tempo-correct-sim.js.
    *  `preservesPitch` étant actif par défaut, ces micro-variations de
    *  vitesse ne transposent PAS le son.
    *
-   *  Tempo GP par segment : `playbackSpeed = userSpeed × 1/pente locale`.
-   *  Toute écriture de `playbackSpeed` re-échelle la position du synthé et le
-   *  COUPE le temps d'un seek (AlphaSynth.updatePlaybackSpeed → mainSeek) :
-   *  c'est le coût que la stratégie « tempo pré-cuit » (P2) supprime.
+   *  TEMPO PRÉ-CUIT (stratégie C, BUGFIX-TOTAL P2) : le tempo de
+   *  l'enregistrement n'est PLUS appliqué par `playbackSpeed` en lecture
+   *  (chaque écriture re-échelle la position du synthé et le COUPE le temps
+   *  d'un seek — AlphaSynth.updatePlaybackSpeed → mainSeek). Il est ÉCRIT
+   *  DANS LE MidiFile par `prebake()`, appelée par player.js juste après la
+   *  génération : le synthé joue donc la partition au tempo de
+   *  l'enregistrement avec `playbackSpeed = userSpeed` CONSTANT.
+   *
+   *  Conséquence sur le PONT : l'axe interne du synthé n'est plus l'axe
+   *  PARTITION mais l'axe PRÉ-CUIT, dont les durées de segment valent celles
+   *  de l'audio. `segmentsFrom()` — LA table partagée par prebake et par le
+   *  pont — expose donc `points[i].t` = axe pré-cuit et `points[i].a` = axe
+   *  audio ; `audioMsFor` s'y applique inchangé. La pente locale reste
+   *  d(audio)/d(pré-cuit) : 1,0 partout sauf segments clampés et sauts.
    */
   const MixSync = (() => {
     const HOLD_MS = 400;   // dérive au-delà de laquelle on recale d'un coup
@@ -83,35 +93,28 @@
     const SLOPE_MIN  = 0.5;  // clamp de la pente locale → rate plancher
     const SLOPE_MAX  = 2.0;  // clamp de la pente locale → rate plafond
 
-    /* --- tempo par segment, corrigé « intégral » (BUGMP3 §13) ---------
-       Le MIDI suit l'enregistrement SEGMENT par SEGMENT (tempo variable de
-       GP) : playbackSpeed = userSpeed × (1/pente locale). L'audio reste à
-       ~1,0× natif partout. Pour que le pont soit indexé sur la VRAIE
-       position musicale quand la vitesse varie, on intègre l'horloge
-       musicale (∫ speed·dt) au lieu de supposer `timePosition × speed` —
-       cette identité ne vaut que si la vitesse est restée constante depuis
-       le dernier seek. Morceaux à tempo uniforme : chaque segment vaut la
-       constante actuelle → comportement inchangé sans branche spéciale. */
-    const TEMPO_EPS     = 0.04;  // hystérésis d'écriture de playbackSpeed (4 %)
-    const TEMPO_HOLD_MS = 300;   // intervalle minimal entre deux écritures
-    const ANCHOR_TOL_MS = 30;    // tolérance du détecteur de saut d'horloge
+    /* --- horloge musicale ---------------------------------------------
+       ANCHOR_TOL_MS : tolérance du détecteur de saut d'horloge (seek,
+       stop, boucle, re-échelle d'alphaTab). Le tempo GP, lui, n'est plus
+       écrit en lecture : voir `prebake` (stratégie C). */
+    const ANCHOR_TOL_MS = 30;
 
-    let points  = [];      // [{ t, a, jump, slope, rawSlope }] trié par t
+    let points  = [];      // [{ t: axe PRÉ-CUIT, a: axe audio, jump, slope, rawSlope, tick }] trié par t
     let nJump   = 0;       // nb de segments de saut (discontinuités)
     let nOff    = 0;       // nb de segments à pente hors plage
-    let avgSlope = 1;      // pente moyenne (tempo enreg. / partition)
-    let tempoScale = 1;    // 1/avgSlope = ModifiedTempo/OriginalTempo (moyenne, fallback + journal)
+    let avgSlope = 1;      // pente moyenne (audio / partition)
+    let tempoScale = 1;    // 1/avgSlope = durée audio / durée partition (journal + repli)
     let bias    = 0;       // décalage constant éventuel (calage manuel)
     let playing = false;
     let active  = false;
+    let leadIn  = false;   // pré-roll : notation AVANT l'audio (1er syncTime < 0)
     let speed   = 1;
     let note    = '';
 
-    let userSpeed = 1;     // vitesse utilisateur (× tempo du segment courant)
-    let musMs   = 0;       // HORLOGE MUSICALE : ∫ playbackSpeed·dt — l'axe du pont
+    let userSpeed = 1;     // vitesse utilisateur (seule écriture de playbackSpeed)
+    let musMs   = 0;       // HORLOGE MUSICALE : ∫ playbackSpeed·dt = axe PRÉ-CUIT
     let musRef  = -1;      // dernier api.timePosition vu (détection de saut/seek)
     let musWall = 0;       // dernier instant réel (performance.now) de l'horloge
-    let lastTempoWrite = 0;
 
     /* état de la boucle + instrumentations (rapportées toutes les STAT_MS) */
     let lastControl = 0, lastWrite = 0, lastMaster = -1;
@@ -127,7 +130,86 @@
       peakDrift = 0; statWin0 = 0;
     }
 
-    /* ---- construction du pont synthé → audio ---- */
+    /* ---- table de segments PARTAGÉE (pont + pré-cuisson) --------------
+       Entrée : points de synchro BRUTS [{ tick, t, a }] — `t` = temps
+       PARTITION (ms), `a` = temps AUDIO (ms), `tick` = tick MIDI.
+       Sortie : { points, nJump, nOff, avgSlope } où `points[i]` porte :
+         · t        axe PRÉ-CUIT (les durées que la pré-cuisson produira) ;
+         · a        axe audio ;
+         · rawNot   d(audio)/d(partition) BRUT ;
+         · notSlope d(audio)/d(partition) CLAMPÉ [SLOPE_MIN, SLOPE_MAX]
+                    (saut → pente du bloc destination) — c'est CE facteur
+                    que `prebake` écrit dans le MidiFile ;
+         · rawSlope d(audio)/d(PRÉ-CUIT) BRUT ;
+         · slope    d(audio)/d(pré-cuit) CLAMPÉ (saut → bloc destination)
+                    — c'est la pente que le pont applique au playbackRate ;
+         · jump     segment de discontinuité audio.
+       Dédoublonnage : `t` identiques → on garde le DERNIER (sémantique
+       d'alphaTab : `while (next.synthTime <= t) i++`). Un segment est un
+       SAUT si l'axe audio recule (Δa < 0) ou sort de [1/JUMP_SLOPE,
+       JUMP_SLOPE] — mouvement impossible pour un tempo. */
+    function segmentsFrom(raw) {
+      const pts = [];
+      for (const p of (raw || [])) {
+        if (!p || !isFinite(p.t) || !isFinite(p.a)) continue;
+        pts.push({ tick: isFinite(p.tick) ? p.tick : 0, tNot: p.t, a: p.a });
+      }
+      pts.sort((x, y) => x.tNot - y.tNot);
+
+      const points = [];
+      for (const p of pts) {
+        while (points.length && p.tNot <= points[points.length - 1].tNot) points.pop();
+        points.push(p);
+      }
+      const n = points.length;
+      let nJump = 0, nOff = 0;
+
+      // 1. sauts + pentes partition (brute, puis clampée)
+      for (let i = 0; i < n; i++) {
+        const p = points[i], q = points[i + 1];
+        if (!q) { p.rawNot = 1; p.notSlope = 1; p.jump = false; continue; }
+        const dt = q.tNot - p.tNot, da = q.a - p.a;
+        p.rawNot = dt > 0 ? da / dt : 1;
+        p.jump = (da < 0) || (p.rawNot < 1 / JUMP_SLOPE) || (p.rawNot > JUMP_SLOPE);
+        p.notSlope = clamp(p.rawNot, SLOPE_MIN, SLOPE_MAX);
+        if (p.jump) nJump++;
+        else if (p.rawNot < SLOPE_MIN || p.rawNot > SLOPE_MAX) nOff++;
+      }
+      // 2. saut → pente du bloc destination (parcours inverse : chaîne les
+      //    sauts consécutifs proprement).
+      for (let i = n - 1; i >= 0; i--) {
+        if (points[i].jump) points[i].notSlope = (i + 1 < n) ? points[i + 1].notSlope : 1;
+      }
+      // 3. axe PRÉ-CUIT : B0 = temps partition du 1er point (avant lui le
+      //    MIDI joue au tempo natif, donc l'axe pré-cuit = l'axe partition) ;
+      //    B_{i+1} = B_i + dNot · notSlope. Puis pente sur l'axe pré-cuit.
+      let sDa = 0, sDt = 0;
+      let B = n ? points[0].tNot : 0;
+      for (let i = 0; i < n; i++) {
+        const p = points[i], q = points[i + 1];
+        p.t = B;
+        p.rawSlope = p.rawNot / (p.notSlope > 0 ? p.notSlope : 1);
+        p.slope = clamp(p.rawSlope, SLOPE_MIN, SLOPE_MAX);
+        if (q) {
+          const dt = q.tNot - p.tNot;
+          if (dt > 0) {
+            B += dt * p.notSlope;
+            if (!p.jump) { sDa += (q.a - p.a); sDt += dt; }
+          }
+        }
+      }
+      for (let i = n - 1; i >= 0; i--) {
+        if (points[i].jump) points[i].slope = (i + 1 < n) ? points[i + 1].slope : 1;
+      }
+      for (const p of points) p.speed = p.slope > 0 ? 1 / p.slope : 1;
+
+      // Pente MOYENNE = rapport partition/audio (hors sauts) → tempoScale =
+      // durée audio / durée partition. Sert de repli et de journal.
+      const avgSlope = sDt > 0 ? sDa / sDt : 1;
+      return { points, nJump, nOff, avgSlope };
+    }
+
+    /* ---- construction du pont pré-cuit → audio ---- */
     function build(score) {
       points = [];
       note   = '';
@@ -141,17 +223,37 @@
           console.warn('[mix]', note);
           return 0;
         }
-        points = (gen.generateSyncPoints(score) || [])
-          .filter(p => p && isFinite(p.synthTime) && isFinite(p.syncTime))
-          .map(p => ({ t: p.synthTime, a: p.syncTime }))
-          .sort((x, y) => x.t - y.t);
-        analyzeSegments();               // dédoublonne + détecte les sauts + pentes
-        musRef = -1; lastTempoWrite = 0; // nouvelle table → horloge ré-ancrée
+        const raw = (gen.generateSyncPoints(score) || [])
+          .map(p => ({ tick: p.synthTick, t: p.synthTime, a: p.syncTime }));
+        const seg = segmentsFrom(raw);   // LA table partagée avec prebake
+        points = seg.points; nJump = seg.nJump; nOff = seg.nOff; avgSlope = seg.avgSlope;
+        tempoScale = (isFinite(avgSlope) && avgSlope > 0) ? 1 / avgSlope : 1;
+        musRef = -1;                     // nouvelle table → horloge ré-ancrée
         note = points.length
           ? points.length + ' point(s) de synchro'
             + (nJump ? ' · ' + nJump + ' saut(s)' : '')
             + (nOff ? ' · ' + nOff + ' pente(s) hors plage' : '')
           : 'aucun point de synchro → axe temporel linéaire';
+
+        // alerte : signale les segments que le rate ne PEUT pas suivre, plutôt
+        // que de saccader silencieusement (les sauts sont déjà gérés).
+        if (nJump || nOff) {
+          const bad = [];
+          for (let i = 0; i < points.length && bad.length < 3; i++) {
+            const p = points[i];
+            if (p.jump) bad.push('#' + i + ' saut');
+            else if (p.rawNot < SLOPE_MIN || p.rawNot > SLOPE_MAX) {
+              bad.push('#' + i + ' pente ' + p.rawNot.toFixed(2));
+            }
+          }
+          const total = nJump + nOff;
+          console.warn(
+            '[mix] tempo hors plage — ' + nJump + ' saut(s), ' + nOff +
+            ' pente(s) hors [' + SLOPE_MIN + ', ' + SLOPE_MAX + ']' +
+            (bad.length ? ' · ' + bad.join(' · ') : '') +
+            (total > 3 ? ' · et ' + (total - 3) + ' autre(s)' : '')
+          );
+        }
       } catch (e) {
         console.warn('[mix] generateSyncPoints', e);
         note   = 'erreur de synchro : ' + (e && e.message ? e.message : e);
@@ -161,92 +263,62 @@
       return points.length;
     }
 
-    /* ---- analyse des segments : dédoublonnage + sauts + pentes --------
-       1. dédoublonne les `t` identiques en gardant le DERNIER — exactement la
-          sémantique d'alphaTab (`while (next.synthTime <= t) i++` avance au-
-          delà de tous les points de même t). Supprime le saut de démarrage
-          quand un fichier a plusieurs points à synthTime = 0 (Dr. Stein).
-       2. flague chaque segment [i → i+1] « saut » si l'axe audio fait un
-          mouvement impossible pour un tempo : recul (Δa < 0) ou pente hors
-          [1/JUMP_SLOPE, JUMP_SLOPE] (vraie discontinuité, à re-ancrer).
-       3. calcule la pente locale (da/dt) ; pour un segment de saut, la pente
-          devient celle du bloc DESTINATION : l'extrapolation rejoint alors le
-          bloc suivant sans discontinuité en q.t, et un seul seek suffit au
-          franchissement (voir audioMsFor).                                  */
-    function analyzeSegments() {
-      nJump = 0; nOff = 0;
-      // 1. dédoublonnage : garder le dernier point de chaque t
-      const dedup = [];
-      for (const p of points) {
-        while (dedup.length && p.t <= dedup[dedup.length - 1].t) dedup.pop();
-        dedup.push(p);
-      }
-      points = dedup;
+    /* ---- PRÉ-CUISSON du tempo dans le MidiFile (stratégie C) -----------
+       Appelée par player.js juste après `MidiFileGenerator.generate()` :
+       on RÉÉCRIT les `TempoChangeEvent` du fichier généré aux ticks des
+       points de synchro, avec `tempoNatif / notSlope` — la règle de SEGMENT
+       ci-dessus, LA MÊME que le pont. Le lecteur live applique alors la
+       partition au tempo de l'enregistrement, segment par segment, avec
+       `playbackSpeed` CONSTANT : plus aucune coupure du synthé (RC-2/RC-3).
 
-      const n = points.length;
-      // 2. sauts + pentes naturelles (clampees)
-      for (let i = 0; i < n; i++) {
-        const p = points[i], q = points[i + 1];
-        if (!q) { p.jump = false; p.slope = 1; p.rawSlope = 1; continue; }
-        const dt = q.t - p.t, da = q.a - p.a;
-        p.rawSlope = dt > 0 ? da / dt : 1;
-        p.jump = (da < 0) || (p.rawSlope < 1 / JUMP_SLOPE) || (p.rawSlope > JUMP_SLOPE);
-        p.slope = clamp(p.rawSlope, SLOPE_MIN, SLOPE_MAX);
-        if (p.jump) nJump++;
-        else if (p.rawSlope < SLOPE_MIN || p.rawSlope > SLOPE_MAX) nOff++;
-      }
-      // 3. segment de saut → pente du bloc destination (parcours inverse pour
-      //    chaîner proprement les sauts consécutifs).
-      for (let i = n - 1; i >= 0; i--) {
-        if (!points[i].jump) continue;
-        points[i].slope = (i + 1 < n) ? points[i + 1].slope : 1;
-      }
-      // 4. TEMPO du segment (correctif intégral §13) : playbackSpeed local =
-      //    1/pente — la pente étant déjà clampée [SLOPE_MIN, SLOPE_MAX], la
-      //    vitesse MIDI reste mécaniquement dans [0,5 ; 2] (tempo GP). Un
-      //    morceau à pente uniforme donne une vitesse uniforme : même valeur
-      //    qu'aujourd'hui, sans branche spéciale.
-      for (const p of points) p.speed = p.slope > 0 ? 1 / p.slope : 1;
+       On retire TOUS les tempos natifs puis on repose un tempo par point de
+       synchro : à l'intérieur d'un segment, l'axe est donc celui de la
+       pré-cuisson (mêmes durées que l'audio), et `segmentsFrom().points[].t`
+       le décrit exactement. Renvoie le nombre de tempos écrits. */
+    function prebake(midiFile, raw, tickShift) {
+      try {
+        if (!midiFile || !midiFile.tracks || !midiFile.tracks.length) return 0;
+        const midi = (typeof alphaTab !== 'undefined') && alphaTab.midi;
+        if (!midi || typeof midi.TempoChangeEvent !== 'function') return 0;
+        const TT = (midi.MidiEventType && midi.MidiEventType.TempoChange) || 81;
+        const seg = segmentsFrom(raw);
+        if (!seg.points.length) return 0;
+        const shift = isFinite(tickShift) ? tickShift : 0;
 
-      // Pente MOYENNE = tempo relatif enregistrement / partition (hors sauts).
-      // tempoScale = 1/penteMoy = ModifiedTempo/OriginalTempo : c'est le RAPPORT
-      // GLOBAL enregistrement/partition. Il n'est PAS appliqué tel quel : la
-      // lecture avance SEGMENT par SEGMENT via applyTempo (playbackSpeed =
-      // userSpeed × 1/pente locale). tempoScale ne sert que de valeur de repli
-      // et de journal (MixSync.info.tempoScale) ; l'audio, lui, reste à ~1,0×
-      // (pas de ralenti, pas de time-stretch).
-      let sDa = 0, sDt = 0;
-      for (let i = 0; i < n; i++) {
-        const p = points[i], q = points[i + 1];
-        if (!q || p.jump) continue;
-        const dt = q.t - p.t;
-        if (dt > 0) { sDa += (q.a - p.a); sDt += dt; }
-      }
-      avgSlope = sDt > 0 ? sDa / sDt : 1;
-      tempoScale = (isFinite(avgSlope) && avgSlope > 0) ? 1 / avgSlope : 1;
-
-      // alerte : signale les segments que le rate ne PEUT pas suivre, plutôt
-      // que de saccader silencieusement (les sauts sont déjà gérés).
-      if (nJump || nOff) {
-        const bad = [];
-        for (let i = 0; i < n && bad.length < 3; i++) {
-          const p = points[i];
-          if (p.jump) bad.push('#' + i + ' saut');
-          else if (p.rawSlope < SLOPE_MIN || p.rawSlope > SLOPE_MAX) {
-            bad.push('#' + i + ' pente ' + p.rawSlope.toFixed(2));
-          }
+        // 1. tempos NATIFS (avant suppression) : référence de tempo du segment
+        const native = [];
+        for (const tr of midiFile.tracks) {
+          for (const e of tr.events) if (e.type === TT && e.beatsPerMinute > 0) native.push(e);
         }
-        const total = nJump + nOff;
-        console.warn(
-          '[mix] tempo hors plage — ' + nJump + ' saut(s), ' + nOff +
-          ' pente(s) hors [' + SLOPE_MIN + ', ' + SLOPE_MAX + ']' +
-          (bad.length ? ' · ' + bad.join(' · ') : '') +
-          (total > 3 ? ' · et ' + (total - 3) + ' autre(s)' : '')
-        );
+        native.sort((a, b) => a.tick - b.tick);
+        const nativeAt = (tick) => {
+          let b = 120;
+          for (const e of native) { if (e.tick <= tick) b = e.beatsPerMinute; else break; }
+          return b;
+        };
+
+        // 2. on retire tous les tempos : la pré-cuisson pilote l'axe entier
+        for (const tr of midiFile.tracks) tr.events = tr.events.filter(e => e.type !== TT);
+
+        // 3. un tempo pré-cuit par point de synchro
+        let n = 0;
+        for (const p of seg.points) {
+          const tick = p.tick + shift;
+          const bpm = nativeAt(tick) / (p.notSlope > 0 ? p.notSlope : 1);
+          if (!(bpm > 0) || !isFinite(bpm)) continue;
+          const ev = new midi.TempoChangeEvent(tick, 0);
+          ev.beatsPerMinute = bpm;
+          midiFile.addEvent(ev);
+          n++;
+        }
+        return n;
+      } catch (e) {
+        console.warn('[mix] pré-cuisson du tempo', e);
+        return 0;
       }
     }
 
-    /* ---- synthTime (ms) → position audio (ms) ---- */
+    /* ---- axe PRÉ-CUIT (ms) → position audio (ms) ---- */
     function audioMsFor(t) {
       const n = points.length;
       if (n === 0) return t + bias;
@@ -277,10 +349,12 @@
       return p.a + (q.a - p.a) * (dt > 0 ? (t - p.t) / dt : 0) + bias;
     }
 
-    /* pente locale (da/dt) du segment contenant t — c'est le facteur qui doit
-       multiplier playbackRate pour que l'audio suive le tempo du pont. Elle est
-       clampee a [SLOPE_MIN, SLOPE_MAX] : hors de cette plage le rate ne peut
-       plus suivre, la derive residuelle est rattrapee par les seeks (HOLD_MS). */
+    /* pente locale d(audio)/d(pré-cuit) du segment contenant t — c'est le
+       facteur qui multiplie playbackRate pour que l'audio suive le pont. Avec
+       le tempo pré-cuit, elle vaut 1,0 partout SAUF les segments clampés et les
+       sauts : l'audio reste donc à ~1,0× natif. Elle est clampée à
+       [SLOPE_MIN, SLOPE_MAX] ; hors de cette plage le rate ne peut plus suivre,
+       la dérive résiduelle est rattrapée par les seeks (HOLD_MS). */
     function slopeAt(t) {
       const n = points.length;
       if (n < 2) return 1;
@@ -294,30 +368,16 @@
       return points[lo].slope;
     }
 
-    /* tempo (vitesse MIDI) du segment contenant t — miroir de slopeAt. */
-    function speedAt(t) {
-      const n = points.length;
-      if (n < 2) return 1;
-      if (t <= points[0].t) return points[0].speed;
-      if (t >= points[n - 1].t) return points[n - 2].speed;
-      let lo = 0, hi = n - 1;
-      while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        if (points[mid].t <= t) lo = mid; else hi = mid - 1;
-      }
-      return points[lo].speed;
-    }
-
     /* ---- HORLOGE MUSICALE : ∫ playbackSpeed·dt ----
-       api.timePosition est une axe REEL (1 ms/ms de temps wall) qu'alphaTab
-       re-echelonne a chaque changement de vitesse (timePosition *= old/new) :
-       `timePosition × speed` ne confond l'axe musical QUE si la vitesse est
-       restee constante depuis le dernier seek. Des que le tempo varie par
-       segment, seule l'integrale est juste. On l'integre ici a la cadence des
-       evenements (~344/s : precision <1 ms entre deux frontieres) ; sur saut
-       detecte (seek, stop, boucle, re-echelonnement vendor) on RE-ANCRE plutôt
-       que d'integrer un trou : le re-echelonnement d'alphaTab conservant la
-       position musicale, l'ancre `real × sp` retrouve exactement musMs. */
+       api.timePosition est un axe REEL (1 ms/ms de temps wall) qu'alphaTab
+       re-echelonne a chaque changement de vitesse (timePosition *= old/new).
+       `timePosition × playbackSpeed` EST l'axe interne du synthé (donc l'axe
+       PRÉ-CUIT) ; on integre tout de meme ∫ sp·dt a la cadence des evenements
+       (~344/s : precision <1 ms entre deux frontieres) car cela reste exact
+       quand la vitesse change, et sur saut detecte (seek, stop, boucle,
+       re-echelonnement vendor) on RE-ANCRE plutot que d'integrer un trou :
+       le re-echelonnement conservant la position musicale, l'ancre `real × sp`
+       retrouve exactement musMs. */
     function advanceMusicalClock(api, now) {
       const real = api.timePosition || 0;
       const sp = curSpeed();
@@ -334,42 +394,19 @@
       return musMs;
     }
 
-    /* ---- moteur de tempo (GP) : le MIDI suit l'enregistrement ----
-       playbackSpeed = userSpeed × speedAt(musMs). Hysteresis TEMPO_EPS +
-       throttle TEMPO_HOLD_MS : les segments contigus de tempo quasi egal ne
-       declenchent AUCUNE ecriture (morceaux uniformes : 0 changement, jamais),
-       et une vraie frontiere (intro 0,65x → riff 1,75x) en déclenche UNE. */
-    function applyTempo(api, now) {
-      if (!api) return;
-      const want = clamp(userSpeed * speedAt(musMs), 0.06, 16);
-      const cur = api.playbackSpeed > 0 ? api.playbackSpeed : 1;
-      if (Math.abs(want - cur) < TEMPO_EPS) return;
-      if (now - lastTempoWrite < TEMPO_HOLD_MS) return;
-      api.playbackSpeed = want;               // alphaTab re-echelonne la position
-      lastTempoWrite = now;
-    }
-
-    /* vitesse utilisateur : rentree dans le moteur de tempo, appliquee sans
-       throttle (geste humain). Sans pont (aucun point de synchro), simple
-       userSpeed — comportement d'avant, sans branche speciale. */
+    /* vitesse utilisateur : SEUL écrivain de `playbackSpeed` (chargement et
+       geste humain). Le tempo GP n'est plus appliqué ici — il est pré-cuit
+       dans le MIDI (`prebake`). On n'écrit que si la valeur change, pour ne
+       pas couper le synthé pour rien (AlphaSynth.updatePlaybackSpeed → seek). */
     function setUserSpeed(v) {
       userSpeed = v > 0 ? v : 1;
       const api = Player.S.api;
       if (!api) return;
-      if (points.length >= 2) {
-        advanceMusicalClock(api, performance.now());   // ancre si table neuve
-        lastTempoWrite = 0;
-        applyTempo(api, performance.now());
-        setRate(api.playbackSpeed > 0 ? api.playbackSpeed : userSpeed);
-      } else {
-        api.playbackSpeed = userSpeed;
-        setRate(userSpeed);
+      if (Math.abs((api.playbackSpeed > 0 ? api.playbackSpeed : 1) - userSpeed) > 1e-6) {
+        api.playbackSpeed = userSpeed;         // re-échelle la position : on ré-ancre
+        musRef = -1;
       }
-    }
-
-    /* vitesse initiale du MIDI : userSpeed × tempo du 1er segment. */
-    function initialSpeed() {
-      return userSpeed * (points.length >= 2 ? speedAt(0) : 1);
+      setRate(userSpeed);
     }
 
     /* vitesse réellement appliquée par alphaTab (source de vérité) */
@@ -378,24 +415,27 @@
       return (a && a.playbackSpeed > 0) ? a.playbackSpeed : speed;
     }
 
-    /* pente locale courante du pont (da/dt) — sur l'axe MUSICAL intégré. */
+    /* pente locale courante du pont — sur l'axe PRÉ-CUIT intégré (≈ 1,0). */
     function slopeNow() {
       return slopeAt(musMs);
     }
 
     /* ---- cible (secondes) sur l'axe audio ---- */
     function targetSeconds() {
-      // axe musical intégré (∫ sp·dt) — plus `timePosition × speed`, qui ne
-      // vaut que si la vitesse est restée constante depuis le dernier seek.
+      // musMs = axe PRÉ-CUIT (∫ sp·dt). Le pont y applique l'axe audio.
+      // La cible peut être NÉGATIVE : la notation démarre parfois AVANT le
+      // début du fichier audio (1er point de synchro à syncTime < 0 — ACDC
+      // −1014 ms, Blink −565 ms). C'est le PRÉ-ROLL, géré par correct() ;
+      // on ne le borne PAS ici (un clamp masquerait le pré-roll et laisserait
+      // un résidu permanent).
       const ms = audioMsFor(musMs);
-      // On borne à 0 (et non null) : un syncTime négatif (ACDC: -1014 ms) ne
-      // doit pas laisser la cible indéfinie et désactiver toute correction.
-      return isFinite(ms) ? Math.max(0, ms) / 1000 : null;
+      return isFinite(ms) ? ms / 1000 : null;
     }
 
     function seekTo(sec) {
       const a = el();
       if (!a || sec == null) return;
+      if (sec < 0) sec = 0;                          // l'audio ne connaît pas le négatif
       try {
         if (Math.abs(a.currentTime - sec) > 0.02) a.currentTime = sec;
       } catch (e) { /* metadata pas encore disponibles */ }
@@ -406,6 +446,7 @@
       if (!active) return;
       const api = Player.S.api;
       if (api) { musMs = (api.timePosition || 0) * curSpeed(); musRef = -1; }
+      leadIn = false;
       seekTo(targetSeconds());
     }
 
@@ -446,9 +487,31 @@
       if (!api || !a || !a.src) return;
 
       const now = performance.now();
-      advanceMusicalClock(api, now);           // axe MUSICAL du pont (∫ sp·dt)
+      advanceMusicalClock(api, now);           // axe PRÉ-CUIT du pont (∫ sp·dt)
       const target = targetSeconds();
       if (target == null) return;
+
+      /* PRÉ-ROLL — la notation démarre AVANT le fichier audio (1er point de
+         synchro à syncTime < 0 : ACDC −1014 ms, Blink −565 ms). Tant que la
+         cible est négative, l'audio n'a RIEN à jouer : on le tient à 0, à
+         l'arrêt. Le laisser avancer puis le recaler par un seek laissait un
+         résidu permanent (l'écart entre le point de recale et la fin du
+         pré-roll) — c'est le défaut que le clamp `Math.max(0, …)` masquait. */
+      if (target < 0) {
+        leadIn = true;
+        if (a.currentTime > 0.02) seekTo(0);
+        if (playing && !a.paused) { try { a.pause(); } catch (e) {} }
+        return;
+      }
+      if (leadIn) {                                  // sortie de pré-roll : PILE
+        leadIn = false;
+        seekTo(target);
+        if (playing) {
+          const p = a.play();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
+        return;
+      }
 
       if (!playing) {                                // en pause : simple recadrage
         if (now - lastControl < CONTROL_MS) return;
@@ -461,8 +524,6 @@
       if (now - lastControl < CONTROL_MS) return;    // ← la cadence imposée ici
       const dt = now - lastControl;
       lastControl = now;
-
-      applyTempo(api, now);   // tempo GP du segment courant (hystérésis + throttle)
 
       const drift = (a.currentTime - target) * 1000; // > 0 : l'audio est en avance
       if (Math.abs(drift) > peakDrift) peakDrift = Math.abs(drift);
@@ -492,7 +553,23 @@
         nSeek++;
         return;
       }
-      if (Math.abs(drift) < DEADBAND_MS) return;      // zone morte : on n'y touche pas
+      if (Math.abs(drift) < DEADBAND_MS) {            // zone morte
+        /* Loi « protège » (arbitrée par tools/tempo-correct-sim.js) : on
+           REVIENT au taux neutre sp × pente — mais SEULEMENT si le neutre
+           RAPPROCHE l'audio de son taux natif pour la vitesse demandée
+           (|neutre − sp| ≤ |taux − sp|). Sinon on se tait. Sans cette remise
+           au neutre, une correction passée (playbackRate ≠ neutre) resterait
+           appliquée en permanence et étirerait l'audio sans raison. */
+        const neutral = clamp(sp * slope, 0.06, 16);
+        if (now - lastWrite >= WRITE_MS
+            && Math.abs(neutral - sp) <= Math.abs(a.playbackRate - sp)
+            && Math.abs(a.playbackRate - neutral) > RATE_EPS) {
+          a.playbackRate = neutral;
+          lastWrite = now;
+          nRate++;
+        }
+        return;
+      }
       if (now - lastWrite < WRITE_MS) return;         // pas d'écriture rapprochée
       // rate = vitesse × pente locale × micro-correction de dérive (±NUDGE).
       // La pente fait converger le mp3 vers le tempo du MIDI ; la correction
@@ -517,14 +594,20 @@
       setRate(curSpeed());
       if (playing && !counting) {
         resync();                                     // on cale AVANT de démarrer
-        const p = a.play();
-        if (p && typeof p.catch === 'function') {
-          p.catch(e => {
-            console.warn('[mix] audio.play()', e);
-            if (e && e.name === 'NotAllowedError') {
-              App.toast('Le navigateur a bloqué l\'audio — relancez la lecture.', 'error');
-            }
-          });
+        const t = targetSeconds();
+        if (t != null && t < 0) {                     // pré-roll : rien à jouer
+          leadIn = true;
+          try { a.pause(); } catch (e) {}
+        } else {
+          const p = a.play();
+          if (p && typeof p.catch === 'function') {
+            p.catch(e => {
+              console.warn('[mix] audio.play()', e);
+              if (e && e.name === 'NotAllowedError') {
+                App.toast('Le navigateur a bloqué l\'audio — relancez la lecture.', 'error');
+              }
+            });
+          }
         }
       } else {
         try { a.pause(); } catch (e) {}
@@ -541,14 +624,14 @@
     }
 
     /* ---- cycle de vie ---- */
-    function start()   { active = true; playing = false; resetStats(); musRef = -1; setRate(speed); }
+    function start()   { active = true; playing = false; leadIn = false; resetStats(); musRef = -1; setRate(speed); }
     function stop()    {
-      active = false; playing = false;
+      active = false; playing = false; leadIn = false;
       const a = el();
       if (a) { try { a.pause(); } catch (e) {} a.playbackRate = 1; }
     }
     function suspend() {                              // nouveau score chargé
-      playing = false;
+      playing = false; leadIn = false;
       const a = el();
       if (a) { try { a.pause(); } catch (e) {} }
     }
@@ -568,15 +651,24 @@
       if (counting) { if (a) { try { a.pause(); } catch (e) {} } return; }
       if (active && playing && a) {                      // fin du décompte
         resync();
-        const p = a.play();
-        if (p && typeof p.catch === 'function') p.catch(() => {});
+        const t = targetSeconds();
+        if (t != null && t < 0) {                        // pré-roll : rien à jouer
+          leadIn = true;
+          try { a.pause(); } catch (e) {}
+        } else {
+          const p = a.play();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        }
       }
     }
 
     return {
-      build, onPosition, onState, resync, setRate, setCountIn,
+      build, prebake, segmentsFrom,
+      onPosition, onState, resync, setRate, setCountIn,
       start, stop, suspend,
-      setUserSpeed, initialSpeed,
+      setUserSpeed,
+      /* sonde de banc (jamais utilisée par l'app) : état interne courant */
+      _probe: () => ({ musMs: musMs, target: targetSeconds(), slope: slopeNow(), speed: curSpeed(), n: points.length, p0t: points.length ? points[0].t : 0, p0a: points.length ? points[0].a : 0, p0s: points.length ? points[0].slope : 0 }),
       get active() { return active; },
       get info()   { return { points: points.length, note: note, bias: bias,
                               tempoScale: tempoScale, userSpeed: userSpeed }; },

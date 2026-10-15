@@ -12,13 +12,16 @@
        puis, pas à pas :  onPosition()  (comme playerPositionChanged)
 
    L'axe maître (api.timePosition) avance de 1 ms par ms ; le `<audio>`
-   avance de son playbackRate ; `performance.now()` est l'horloge factice.
+   avance de son playbackRate (à l'arrêt, il ne bouge pas) ; `performance.now()`
+   est l'horloge factice.
    La ré-échelle destructrice d'alphaTab est reproduite fidèlement :
    `set playbackSpeed` fait `timePosition *= ancien/nouveau`
    (AlphaSynth.updatePlaybackSpeed, vendor l.39849).
 
    Compté sur le code RÉEL :
-     · tempoWrites  = écritures `api.playbackSpeed` (= 1 coupure synthé : RC-2)
+     · tempoWrites  = écritures `api.playbackSpeed` (= 1 coupure synthé : RC-2).
+                      CIBLE 0 : après P2 le tempo GP est PRÉ-CUIT dans le MIDI,
+                      la lecture ne doit plus jamais y toucher (RC-2/RC-3 morts).
      · rateWrites   = écritures `audio.playbackRate` (RC-3, saccades)
      · seekWrites   = écritures `audio.currentTime` (recadrages)
      · peakDrift    = dérive pic relue dans `[mix-stats]` (instrumentation LIVRÉE)
@@ -83,8 +86,9 @@ if (etat !== 'installed' && etat !== 'already') {
 
 /* ---- le CONTRÔLEUR, lu tel quel ------------------------------------ */
 const MIX_SYNC_SRC = fs.readFileSync(path.join(ROOT, 'js', 'mix-sync.js'), 'utf8');
-if (MIX_SYNC_SRC.indexOf('function applyTempo') < 0) {
-  throw new Error('js/mix-sync.js inattendu : applyTempo absent (fichier non livré ?)');
+if (MIX_SYNC_SRC.indexOf('function prebake') < 0 ||
+    MIX_SYNC_SRC.indexOf('function segmentsFrom') < 0) {
+  throw new Error('js/mix-sync.js inattendu : prebake/segmentsFrom absents (fichier non livré ?)');
 }
 
 /* ============================ le banc ============================== */
@@ -170,11 +174,22 @@ function drive(bench, score, dt, lastT) {
   MixSync.onState(PLAYING);              // resync + a.play()
 
   let steps = 0;
+  const TRACE = bench.trace;
   while (sim.now < capMs && steps < 5e6) {
     api._tp += dt;                              // axe réel : 1 ms / ms
-    audio._ct += audio._rate * dt / 1000;       // <audio> suit son playbackRate
+    // <audio> en LECTURE avance de son playbackRate ; à l'ARRÊT il ne bouge
+    // pas (comportement réel : c'est ce qui rend le pré-roll silencieux).
+    if (!audio.paused) audio._ct += audio._rate * dt / 1000;
     sim.now += dt;
     MixSync.onPosition();                       // == playerPositionChanged
+    if (TRACE && (steps % 200 === 0 || (steps > 300 && steps < 320))) {
+      const p = MixSync._probe();
+      const drift = (audio._ct - p.target) * 1000;
+      console.log('   [trace] t=' + Math.round(sim.now) + ' ct=' + (audio._ct * 1000).toFixed(1) +
+        ' target=' + (p.target * 1000).toFixed(1) + ' drift=' + drift.toFixed(1) +
+        ' rate=' + audio._rate.toFixed(4) + ' musMs=' + p.musMs.toFixed(1) +
+        ' slope=' + p.slope.toFixed(4) + ' p0(t=' + p.p0t.toFixed(0) + ',a=' + p.p0a.toFixed(0) + ',s=' + p.p0s.toFixed(3) + ')');
+    }
     steps++;
   }
   return { steps, capMs, tempoWrites: c.tempo - tempo0 };
@@ -236,6 +251,7 @@ const argv = process.argv.slice(2);
 let DT = 25;
 for (let i = 0; i < argv.length; i++) if (argv[i] === '--dt') DT = Math.max(1, Number(argv[i + 1]) || 25);
 const VERBOSE = argv.includes('--verbose');
+const TRACE = argv.includes('--trace');
 const onlyGp = argv.includes('--gp') ? path.resolve(argv[argv.indexOf('--gp') + 1]) : null;
 
 function loadScore(file) {
@@ -257,7 +273,7 @@ console.log('tempoWrites = écritures playbackSpeed (1 = 1 coupure synthé) · r
 console.log('dérive croisière = MÉDIANE des pics de fenêtre · pic = max (inclut les sauts volontaires)');
 console.log('');
 
-const hdr = ['fichier', 'points', 'saut', 'tempoWrites', 'REF', 'écart', 'rateWrites', 'seekWrites', 'dérive croisière', 'pic', 'stalls', 'simSec'];
+const hdr = ['fichier', 'points', 'saut', 'tempoWrites', 'REF P0', 'écart', 'rateWrites', 'seekWrites', 'dérive croisière', 'pic', 'stalls', 'simSec'];
 const lines = ['| ' + hdr.join(' | ') + ' |', '|' + hdr.map(() => '---').join('|') + '|'];
 
 let bad = 0, totalTempo = 0, totalRef = 0, totalRate = 0, totalSeek = 0, worstDrift = 0, worstMed = 0;
@@ -267,6 +283,7 @@ for (const file of files) {
   try {
     const score = loadScore(file);
     const bench = makeBench();
+    bench.trace = TRACE;
     const lastT = (() => {
       const pts = at.midi.MidiFileGenerator.generateSyncPoints(score) || [];
       let m = 0; for (const p of pts) if (isFinite(p.synthTime) && p.synthTime > m) m = p.synthTime;
@@ -323,17 +340,18 @@ for (const file of files) {
 
 console.log(lines.join('\n'));
 console.log('');
-const gap = totalRef ? Math.abs(totalTempo - totalRef) / totalRef : 0;
-if (totalRef && gap > 0.02) bad++;
-console.log('tempoWrites (total) : ' + totalTempo + (totalRef ? '   REF ' + totalRef : '') +
-            (totalRef ? '   écart ' + (gap * 100).toFixed(2) + '%' + (gap > 0.02 ? ' ⚠ > 2 %' : ' ✓') : ''));
+/* Critère de sortie P2 : le tempo GP est PRÉ-CUIT dans le MidiFile → la
+   lecture ne doit JAMAIS écrire `playbackSpeed` (0 coupure du synthé). */
+if (totalTempo !== 0) bad++;
+console.log('tempoWrites (total) : ' + totalTempo +
+            (totalTempo === 0 ? '   ✓ 0 (tempo pré-cuit : synthé jamais coupé)' : '   ⚠ > 0 — le tempo est encore écrit en lecture'));
 console.log('rateWrites  (total) : ' + totalRate + '   seekWrites (total) : ' + totalSeek);
 console.log('dérive croisière (pire) : ' + worstMed + ' ms   (médiane des pics de fenêtre)');
 console.log('dérive pic (pire)       : ' + worstDrift + ' ms   (max, sauts volontaires inclus)');
 console.log('');
-console.log('LECTURE : tempoWrites = 0 est la CIBLE après P2 (tempo pré-cuit) ; avant, c\'est');
-console.log('le nombre de coupures du synthé. Écart REF > 2 % = le contrôleur réel s\'écarte');
-console.log('des harnais-miroirs → un des deux ment, à investiguer avant toute décision.');
-console.log('La « dérive croisière » est le seul indicateur de décalage PERMANENT ; le pic,');
-console.log('lui, vaut la TAILLE d\'un saut de renvoi (recadré par un seul seek).');
+console.log('LECTURE : tempoWrites = 0 est la CIBLE de P2 (tempo pré-cuit dans le MidiFile) ;');
+console.log('avant P2, c\'était le nombre de coupures du synthé (colonne « REF P0 » = valeur');
+console.log('d\'avant, gardée pour mémoire). La « dérive croisière » est le seul indicateur de');
+console.log('décalage PERMANENT ; le pic, lui, vaut la TAILLE d\'un saut de renvoi (recadré par');
+console.log('un seul seek).');
 process.exit(bad === 0 ? 0 : 1);
