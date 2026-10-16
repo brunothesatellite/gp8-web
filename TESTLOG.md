@@ -5,8 +5,15 @@
 > est pré-rempli avec les morceaux, les **mesures/repères précis** à observer et
 > les critères attendus ; les colonnes *Relevé / Verdict* sont à remplir.
 >
-> **Référence du plan** : `BUGFIX-TOTAL.md` §5.2 (les 15 points d'écoute) et
-> §5.3 (journal). Ce fichier est la version **opérationnelle** à remplir.
+> **Référence du plan** : `BUGFIX-TOTAL.md` §5.2 (points d'écoute) et §5.3
+> (journal). Ce fichier est la version **opérationnelle** à remplir.
+>
+> **Numérotation des mesures** : toutes les mesures sont notées **M. n**, où *n*
+> est le numéro **affiché par l'app** (indicateur `M. n/N` en haut de la
+> partition) ; il vaut *index de mesure + 1*. Une éventuelle **anacrouse**
+> (mesure d'intro incomplète, présente sur ACDC, Blink, F-Zero, For Whom,
+> **Nirvana**, Offspring et **Dr. Stein**) est donc **M. 1** — jamais « M. 0 ».
+> Les horodatages (*≈ mm:ss*) sont ceux de l'app.
 
 ---
 
@@ -14,11 +21,12 @@
 
 | Invariant | Preuve |
 |---|---|
-| `playbackSpeed` **jamais écrit en lecture** (⇒ 0 coupure de synthé) | banc **15/15** + navigateur réel **15/15** |
-| 0 erreur console | navigateur **15/15** |
-| dérive de croisière bornée par la zone morte | **10-80 ms** (navigateur), **≤ 11 ms** (banc) |
-| anacrouses alignées sur l'audio | **6/6 ≤ 0,04 %** |
-| fin de webapp **jamais** au-delà du MP3 | **15/15** |
+| `playbackSpeed` **jamais écrit en lecture** (⇒ 0 coupure de synthé) | banc `mix-sync-harness` **16/16** (`tempoWrites = 0`) + navigateur réel |
+| 0 erreur console | navigateur réel, chaque morceau |
+| dérive de croisière bornée par la zone morte | **0-11 ms** (banc), **10-79 ms** (navigateur) |
+| anacrouses alignées sur l'audio | **7/7 ≤ 0,04 %** |
+| fin de webapp **jamais** au-delà du MP3 | **16/16** |
+| oracle de renvoi : converge en **une** passe sur les 16 | `tools/repeat-check` (propriété D) |
 | `node tools/test-all.js` | **8/8**, exit 0 |
 
 **Question posée à l'oreille** : le **ressenti** (timbre, « colle » MIDI↔MP3,
@@ -100,15 +108,16 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 
 ### 5.1 · ACDC — Highway to Hell
 `ACDC (1979 - Highway to Hell) - Highway to Hell.gp`
-**Angle** : renvoi **DS al Coda** en milieu de morceau + divergence de données GP (H2).
-**Machine** : 43 mesures · 68 points · résidu **12 clés / 6 mesures H2 (5-8, 12-13)** · points **M6, M7**
+**Angle** : **anacrouse** + reprises imbriquées + divergence de données GP (H2).
+**Machine** : 43 mesures · 68 points · résidu **12 clés / 6 mesures H2 (M.6-9, M.13-14)** · anacrouse **M.1** (≈ 2,26 s)
 
 | # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
 |---|---|---|---|---|---|
-| 1 | ≈ 01:03 | fin 17 → **6** | le saut D.S. al Coda est **net et unique** (pas de double déclenchement) | | |
-| 2 | ≈ 01:10 | — | l'audio correspondant est situé là dans le MP3 (**normal**, donnée GP) | | |
-| 3 | continu | 5-8, 12-13 | **aucun saut parasite** ajouté (écart accepté = donnée GP) | | |
-| 4 | continu | groupes `@2/5`, `@6/9`, `@13/14`, `@30/31`, `@34/35` | chaque **volta à fin unique** jouée le bon nombre de fois | | |
+| 1 | ≈ 00:00 | **M.1** (anacrouse) | la mesure d'intro (réelle dans le `.gp`) dure une mesure pleine ≈ **2,26 s** : le MIDI démarre **en phase** | | |
+| 2 | continu | M.6-9, M.13-14 | **aucun saut parasite** ajouté (l'écart auditeur = **donnée GP** : Guitar Pro décrit plus de traversées que la partition n'en joue) | | |
+| 3 | ≈ 01:18 | M.9 (fin de volta) → M.10 | le saut de fin de volta est **net et unique** (pas de double déclenchement) | | |
+| 4 | ≈ 01:49 | M.14 (fin de reprise) → M.15 | saut de reprise **net et unique** | | |
+| 5 | ≈ 03:14 | M.41 → M.42 | dernier saut (fin du dernier groupe ×3) : **net** | | |
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
@@ -119,15 +128,15 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 
 ### 5.2 · Blink 182 — All the Small Things
 `Blink 182 (1999 - Enema Of The State) - All the Small Things v2.gp`
-**Angle** : **volta à fins multiples** (3 fins) — le cas où alphaTab était fautif.
+**Angle** : **volta à fins multiples** (4 fins : M.9 = fins 1→3, M.10 = fin 4) — le cas où alphaTab était fautif.
 **Machine** : 53 mesures · 147 points · résidu **0** · points **M10**
 
 | # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
 |---|---|---|---|---|---|
-| 1 | continu | 6-10 | séquence **`6-7-8-9` ×3 puis `6-7-8-10`** | | |
-| 2 | 3ᵉ passage | 9 → 10 | la **fin 4 (mes 10)** arrive **après** le 3ᵉ passage, pas avant | | |
-| 3 | continu | 6-10 | **aucune fin escamotée**, aucun passage en trop (⚠ le nombre de traversées a **changé** avec le correctif → **à écouter en priorité**) | | |
-| 4 | continu | 6-10 | le MIDI ne **se dédouble pas** au passage fin 3 → fin 4 | | |
+| 1 | continu | M.6-10 | séquence **`M.6-7-8-9` ×3 puis `M.6-7-8-10`** | | |
+| 2 | 3ᵉ passage | **M.9 → M.10** | la **fin 4 (M.10)** arrive **après** le 3ᵉ passage, pas avant | | |
+| 3 | continu | M.6-10 | **aucune fin escamotée**, aucun passage en trop (⚠ le nombre de traversées a **changé** avec le correctif → **à écouter en priorité**) | | |
+| 4 | continu | M.6-10 | le MIDI ne **se dédouble pas** au passage fin 3 → fin 4 | | |
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
@@ -173,13 +182,13 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 
 ### 5.5 · Helloween — Dr. Stein
 `Helloween (1988 - Keeper of the Seven Keys - Part II) - Dr. Stein.gp`
-**Angle** : **anacrouse vide** (mesure 0) + écart de tempo **permanent** (symptôme d'origine n°1).
-**Machine** : 114 mesures · 112 points · résidu **0** · points **M4, M5**
+**Angle** : **anacrouse vide** (pickup escamotée — affichée **M. 1**) + écart de tempo **permanent** (symptôme d'origine n°1).
+**Machine** : 114 mesures · 112 points · résidu **0** · anacrouse **M.1** (mesure **VIDE** dans le `.gp`)
 
 | # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
 |---|---|---|---|---|---|
-| 1 | ≈ 00:00 | **0** (anacrouse) | la mesure 0 est **VIDE** dans le `.gp` ; elle doit durer **une mesure pleine** (≈ 1 599 ms) et **ne pas être escamotée** → le MIDI démarre **en phase** | | |
-| 2 | ≈ 00:00 | 16-19 | **plus aucun retour en arrière** audio (le symptôme d'origine) | | |
+| 1 | ≈ 00:00 | **M.1** (anacrouse) | la mesure est **VIDE** dans le `.gp` (seul l'audio dit sa durée) : elle doit durer **une mesure pleine ≈ 1 599 ms** et **ne pas être escamotée** → le MIDI démarre **en phase** | | |
+| 2 | aux reprises | M.16-19 | à la jonction des groupes (M.10-17, puis M.18-32) : **plus aucun retour en arrière** audio (le symptôme d'origine) | | |
 | 3 | continu | tout | tempo constant ≈ **1,22×**, **0 coupure** | | |
 | 4 | — | — | **X1** (×0,5 / ×1,5) appliqué | | |
 
@@ -224,15 +233,15 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 
 ### 5.8 · Iron Maiden — Fear of the Dark
 `Iron Maiden (1992 - Fear of the Dark) - Fear of the Dark.gp`
-**Angle** : **tempos très variables** (intro lente ↔ riff rapide) et leurs **transitions**.
+**Angle** : **tempos très variables** (intro lente ↔ riff rapide) et leur **transition**.
 **Machine** : 127 mesures · 137 points · résidu **0** · points **M1, M2, M3**
 
-| # | Repère | Où | Attendu | Relevé | Verdict |
+| # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
 |---|---|---|---|---|---|
-| 1 | 00:00-00:30 | mes 1-16 | intro lente (≈ **0,65×**) **sans à-coups**, MIDI collé au MP3 | | |
-| 2 | 02:01-04:11 | riffs | ≈ **1,72-1,79×** — **pas de « début trop rapide »** (symptôme d'origine) | | |
-| 3 | — | mes 98 | transition de tempo la plus marquée (pente 0,524) : **pas de saut ni de flottement** | | |
-| 4 | ~00:30, ~02:01 | frontières intro→riff | **ni trou ni décalage** à la bascule de tempo | | |
+| 1 | ≈ 00:25 | **M.4-M.6** | bascule intro lente → riff : **ni trou ni décalage**. C'est là que se concentrent les **3 sauts volontaires** et les **2 pentes hors tolérance** mesurées du fichier | | |
+| 2 | 01:00-04:11 | riffs | le MIDI reste **collé** au MP3 : **pas de « début trop rapide »** (symptôme d'origine) | | |
+| 3 | — | voltes **M.4/5** · **M.15-17** · **M.21/22** | les fins de répétition sont jouées **dans l'ordre** — dont la **fin 3 (M.16)**, qu'alphaTab seul ne jouait **jamais**, et les **4 passages de M.14** | | |
+| 4 | fin | M.127 | fin de morceau **propre** | | |
 | 5 | — | — | **X1** (×0,5 / ×1,5) appliqué | | |
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
@@ -259,15 +268,23 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 
 ---
 
-### 5.10 · Metallica — The Four Horsemen  *(témoin + correctif P6)*
+### 5.10 · Metallica — The Four Horsemen  *(témoin P6 + renvois denses)*
 `Metallica (1983 - Kill 'Em All) - The Four Horsemen.gp`
-**Angle** : témoin **+ validation du manifeste** (ce morceau était **absent de la liste** avant P6).
-**Machine** : 179 mesures · 240 points · résidu **0** · points **M15**
+**Angle** : **3 grandes discontinuités** de renvoi + thème repris **8×** + **volta à 2 fins** ; c'est aussi le **témoin du manifeste** (absent de la liste avant P6).
+**Machine** : 179 mesures · 240 points · résidu **0** · anacrouse : aucune
+**Structure jouée (mesurée)** : M.23-29 **×8** · M.30-39 ×3 · M.44-49 ×2 (volta M.50/M.51) · M.56-62 ×2 · M.65 **×6** · M.67-70 ×4 · M.74-77 **×8** · M.105-108 ×4 · M.128-134 ×2 · M.136-139 ×4
 
-| # | Repère | Où | Attendu | Relevé | Verdict |
+| # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
 |---|---|---|---|---|---|
 | 1 | — | liste des exemples | le morceau **apparaît** dans la liste et **se charge** (correctif P6) | | |
-| 2 | continu | tout | identique à la référence, 0 coupure | | |
+| 2 | ≈ 00:41 | **M.29 → M.23** (2ᵉ passage du thème) | reprise du thème : **un seul** saut, net, le MIDI se recolle aussitôt | | |
+| 3 | ≈ 01:30 | **M.29 → M.23** (4ᵉ passage) | **grande discontinuité** : un seul saut, **sans double lecture** | | |
+| 4 | ≈ 05:30 | **M.29 → M.30** (6ᵉ passage) | **recul** de l'audio — le seul du morceau : saut **propre**, pas de hoquet | | |
+| 5 | ≈ 01:06 | **M.50 / M.51** | **volta à 2 fins** (groupe M.44-49 ×2) : la **fin 2 (M.51)** arrive au **2ᵉ** passage, **jamais avant** | | |
+| 6 | ≈ 02:05 · ≈ 02:38 | **M.65 (×6)** · **M.74-77 (×8)** | riffs courts **très répétés** : le **nombre de passages** doit être exact (6, puis 8) — point le plus sensible du morceau | | |
+| 7 | ≈ 06:04 | **M.136-139 ×4** | dernière reprise longue (44 mesures du `.gp`) : **4 passages**, dans l'ordre | | |
+| 8 | fin | fin | l'app s'arrête ≈ **3 s** avant la fin de l'audio (partition **429,1 s** / MP3 **432,6 s**) : la fin **ne doit pas couper** | | |
+| 9 | continu | tout | identique à la référence, 0 coupure | | |
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
@@ -295,16 +312,16 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 
 ### 5.12 · Renaud — Morgane de toi  ⚠ *fiche critique*
 `Renaud (1983 - Morgane de toi) - Morgane de toi (amoureux de toi).gp`
-**Angle** : renvois **complexes** (D.S., D.S.S., Coda) + **4 mesures H1 refusées** + forte divergence (55 clés).
-**Machine** : 50 mesures jouées · 100 points · résidu **55 clés (33 H2 + 4 H1 refusées : mes 8/9/11/42)** · points **M8, M9**
+**Angle** : renvois **complexes** (reprises imbriquées, voltes à fins multiples) + **4 mesures H1 refusées** + forte divergence (55 clés).
+**Machine** : 50 mesures jouées · 100 points · résidu **55 clés (33 H2 + 4 H1 refusées : M.9, M.10, M.12, M.43)** · points **M8, M9**
 
 | # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
 |---|---|---|---|---|---|
-| 1 | ≈ 00:00 | 1-6 | séquence **`1 2 3 4 · 1 2 3 5 · 1 2 3 6`** | | |
-| 2 | — | 15-21 | **volta à 4 fins** : les 4 fins **dans l'ordre**, aucun passage sauté | | |
-| 3 | — | global | parcours **1→36 puis D.S. vers mes 5 puis 50 (Coda)** ; la reprise repart bien **en mesure 5** | | |
-| 4 | — | **8, 9, 11, 42** | mesures **H1 refusées** : **aucun saut parasite** (l'écart MIDI/audio = **donnée GP**) | | |
-| 5 | — | — | un pic de dérive ≈ **6 939 ms** au moment d'un saut de renvoi est **attendu** (ce n'est **pas** un défaut) | | |
+| 1 | ≈ 00:00 | M.1-5 | première reprise : **fin 1 (M.4)** puis **fin 2 (M.5)** — les fins tombent **dans l'ordre** | | |
+| 2 | — | **M.18-21** | **volta à 4 fins** (groupe M.15-17) : les 4 fins **dans l'ordre**, aucun passage sauté | | |
+| 3 | ≈ 03:42 | **M.37 → M.38** | **grand saut de renvoi** (l'audio avance d'≈ **94 s**) : un seul saut, **sans double lecture** | | |
+| 4 | — | **M.9, M.10, M.12, M.43** | mesures **H1 refusées** par la garde : **aucun saut parasite** (l'écart MIDI/audio = **donnée GP**) | | |
+| 5 | — | — | un **pic de dérive** au moment d'un saut de renvoi est **attendu** ; seule la **médiane** compte | | |
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
@@ -332,15 +349,15 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 
 ### 5.14 · Slayer — Hell Awaits  ⚠ *fiche critique*
 `Slayer (1985 - Hell Awaits) - Hell Awaits.gp`
-**Angle** : **saccades / micro-sauts d'origine** (RC-1 + RC-2) · seul fichier en **44,1 kHz**.
+**Angle** : **saccades / micro-sauts d'origine** (RC-1 + RC-2) — le fichier le plus « relevé » par l'oracle (4 groupes).
 **Machine** : 138 mesures · 149 points · résidu **0** · points **M11, M12**
 
-| # | Repère | Où | Attendu | Relevé | Verdict |
+| # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
 |---|---|---|---|---|---|
 | 1 | ≈ 01:00 | zone des saccades | **plus aucun micro-saut** ni note coupée | | |
-| 2 | ≈ 00:00 | intro | le MP3 démarre à **1:04,7** (silence audio initial) : alignement **propre** | | |
-| 3 | — | 44, 53, 117 | répétitions : **4 passages** chacun, dans l'ordre | | |
-| 4 | — | segments de pont | les segments à pente extrême **0,50-0,69×** d'avant correctif ont **disparu** → le MIDI ne **traîne** ni n'**accélère** brutalement | | |
+| 2 | continu | tout | le MIDI reste **collé** au MP3 (l'oracle a relevé **4 groupes** : clés manquantes **8 → 0**) | | |
+| 3 | — | voltes **M.48/49 · M.55/56 · M.61/62 · M.108/109 · M.114/115 · M.119/120** | chaque fin de répétition au **bon passage** | | |
+| 4 | — | groupes joués **4×** (M.32-33, M.57, M.67-68, M.73-74, M.110, M.116-118) | **4 passages** chacun, dans l'ordre | | |
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
@@ -352,14 +369,43 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 ### 5.15 · The Offspring — Self Esteem
 `The Offspring (1994 - Smash) - Self Esteem.gp`
 **Angle** : **saut historique de 6,9 s** (≈ 0:51) + divergence de données GP (H2).
-**Machine** : 51 mesures · 251 points · résidu **5 clés / 2 mesures H2 (18-19)** · points **M13, M14**
+**Machine** : 51 mesures · 251 points · résidu **5 clés / 2 mesures H2 (M.19, M.20)** · points **M13, M14**
 
-| # | Repère | Où | Attendu | Relevé | Verdict |
+| # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
 |---|---|---|---|---|---|
 | 1 | ≈ 00:51 | — | **plus de saut parasite** (les 6,9 s historiques) | | |
-| 2 | — | 18-19 | écart auditeur = **donnée GP** : **aucun saut ajouté** | | |
+| 2 | — | **M.19-20** | écart auditeur = **donnée GP** : **aucun saut ajouté** | | |
 | 3 | continu | tout | **0 coupure** | | |
 | 4 | — | — | **X1** (×0,5 / ×1,5) appliqué | | |
+
+**Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
+**Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
+**Verdict morceau** : ☐ ✅ ☐ 🟡 ☐ ❌ ☐ ? — **Anomalie(s)** n° ____________
+**Notes** : ________________________________________________________________
+
+---
+
+### 5.16 · Nirvana — Come as you are  ⚠ *fiche critique (ajoutée après le plan)*
+`Nirvana (1991 - Nevermind) - Come as you are.gp`
+**Angle** : **anacrouse** + **volta à 8 fins** (M.5 = fins 1→7, M.6 = fin 8) — la structure de renvoi la plus chargée des 16 morceaux ; c'est elle qui a montré que l'oracle doit **itérer** (voir `BUGFIX-TOTAL.md` §5.1.1).
+**Machine** : 43 mesures · 65 points · résidu **0** · anacrouse **M.1** (≈ 2,07 s)
+**Structure jouée (mesurée)** : M.2-3 ×4 · **M.4 ×8, M.5 ×7, M.6 ×1** · M.7-9 ×2 · M.10-11 ×1 · M.12 ×4, M.13 ×3, M.14 ×1 · M.15-17 ×2 · M.18-19 ×1 · M.20 ×4, M.21 ×3, M.22 ×1 · M.23 ×2 · M.24-25 ×1 · M.26-29 ×4 · M.30-37 ×1 · **M.38-39 ×5, M.40 ×1** · M.41-42 ×4 · M.43 ×1
+
+| # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
+|---|---|---|---|---|---|
+| 1 | ≈ 00:00 | **M.1** (anacrouse) | la mesure d'intro est **réelle** dans le `.gp` : elle dure **une mesure pleine ≈ 2,07 s** → le MIDI démarre **en phase** (pas d'intro escamotée) | | |
+| 2 | ≈ 00:01 | M.2-3 ×4 | riff d'entrée joué **4 fois** : MIDI et audio restent **collés** | | |
+| 3 | ≈ 00:17 | **M.4-6** | **volta à 8 fins** : le couplet est joué **8 fois** (7 fins sur M.5, la 8ᵉ sur M.6). C'est le point **le plus sensible** du fichier : un mauvais comptage décale tout le morceau | | |
+| 4 | 00:49-01:35 | M.10/11 · M.13/14 · M.18/19 · M.21/22 · M.24/25 | les **5 voltes à 2 fins** : chaque fin tombe au **bon passage**, aucune escamotée | | |
+| 5 | ≈ 02:01 | M.26-29 ×4 | reprise du refrain : **4 passages**, dans l'ordre | | |
+| 6 | ≈ 02:50 | **M.38-40** | **volta à 6 fins** (M.39 = fins 1→5, M.40 = fin 6) : 5 passages puis la **sortie** | | |
+| 7 | ≈ 03:27 | M.43 (dernière reprise) | le saut de fin de renvoi est **net**, puis **arrêt propre** | | |
+| 8 | fin | fin | l'app s'arrête ≈ **03:36** alors que la musique va jusqu'à ≈ **03:39** (le MP3 fait 4:16 mais ses **36,6 dernières secondes sont du silence**) : la fin **ne doit pas couper** | | |
+
+**Note de correctif (16/10/2026)** : ce morceau a révélé que l'oracle de renvoi
+n'atteignait pas son optimum en **une** passe (2 clés GPIF non couvertes sur M.4).
+`js/repeat-oracle.js` itère désormais **jusqu'au point fixe** : Nirvana passe de
+**13 → 0** clés manquantes, **sans aucun changement** sur les 15 autres morceaux.
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
@@ -407,6 +453,7 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 | 13 | Sepultura — Amen | | | |
 | 14 | Slayer — Hell Awaits | | | |
 | 15 | The Offspring — Self Esteem | | | |
+| 16 | Nirvana — Come as you are | | | |
 | — | **X1** Vitesse ×0,5 / ×1,5 | | | |
 | — | **X2** Isolation A/B *(si requis)* | | | |
 | — | **Mobile** (Pixel 7a, voir BUGFIX-TOTAL §7) | | | |

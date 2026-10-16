@@ -47,12 +47,12 @@ Contraintes tenues :
 |---|---|---|
 | **P0** — mesure fiable | ✅ livré | `sync-audit` refondu + `mix-sync-harness` qui exécute le code livré |
 | **P1** — spike stratégie C | ✅ livré | GO ; règle A rejetée, règle B retenue (§2.2) |
-| **P2** — tempo pré-cuit dans le MIDI | ✅ livré | **tempoWrites 0/15**, dérive croisière ≤ 11 ms, fidélité < 0,5 % |
-| **P3** — RC-1 résiduel | ✅ livré | clés manquantes **104 → 72** ; résidu **H2** (donnée GP) ; 4 mesures **H1** refusées par la garde |
-| **P4** — anacrouse & fin de morceau | ✅ livré | **6/6** anacrouses ≤ 0,04 % ; fin de webapp **jamais** au-delà du MP3 (15/15) |
-| **P5** — suite unique | ✅ livré | `tools/test-all.js` : **8** harnais ; `tools/browser/` : **15/15** en navigateur réel |
-| **P6** — clôture & déploiement | ✅ livré | manifeste **15/15** ; `deploy/` conforme (8 `js/*.js` identiques) |
-| **Écoute (§5.2)** | ⏳ **humaine** | les 15 points |
+| **P2** — tempo pré-cuit dans le MIDI | ✅ livré | **tempoWrites 0/16**, dérive croisière ≤ 11 ms, fidélité < 0,5 % |
+| **P3** — RC-1 résiduel | ✅ livré | clés manquantes **104 → 70** ; résidu **H2** (donnée GP) ; 4 mesures **H1** refusées par la garde |
+| **P4** — anacrouse & fin de morceau | ✅ livré | **7/7** anacrouses ≤ 0,04 % ; fin de webapp **jamais** au-delà du MP3 (16/16) |
+| **P5** — suite unique | ✅ livré | `tools/test-all.js` : **8** harnais ; `tools/browser/` : **16/16** en navigateur réel |
+| **P6** — clôture & déploiement | ✅ livré | manifeste **16/16** ; `deploy/` conforme (8 `js/*.js` identiques) |
+| **Écoute (§5.2)** | ⏳ **humaine** | les 16 points (`TESTLOG.md`) |
 | **Validation mobile (§7)** | ⏳ **humaine** | Pixel 7a |
 
 ---
@@ -112,55 +112,62 @@ d'audio reculant. Sinon la garde **refuse**, et l'état d'origine est conservé.
 C'est ce qui permet d'affirmer, mesure à l'appui, que le résidu restant est une
 **donnée GP** et non un défaut de code.
 
-### 2.5 Résultat navigateur réel — `node run.js --all`, 15 exemples, 21 s chacun
+### 2.5 Résultat navigateur réel — `npm run test:all`, 16 exemples, 21 s chacun
 
 | exemple | mes. | pts synchro | audio (s) | horloge (s) | audio joué (s) | `spÉcrit` | taux | dérive croisière | pic | arrêts | err | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| AC/DC — Highway to Hell | 43 | 68 | 310,1 | 21,2 | 20,0 | **0** | 0,0 % | 77 ms | 77 ms | 0 | 0 | 🟡 |
-| Blink 182 — All the Small Things | 53 | 147 | 256,1 | 21,1 | 20,4 | **0** | 13,3 % | 69 ms | 196 ms | 0 | 0 | 🟡 |
-| Europe — The Final Countdown | 103 | 58 | 309,1 | 20,8 | 20,7 | **0** | 13,3 % | 39 ms | 116 ms | 0 | 0 | 🟡 |
-| F-Zero X — Goal BGM | 10 | 14 | 422,1 | 14,1 | 14,5 | **0** | 0,0 % | 10 ms | 10 ms | 0 | 0 | ✅ |
-| Helloween — Dr. Stein | 114 | 112 | 306,4 | 21,2 | 21,0 | **0** | 0,0 % | 80 ms | 80 ms | 0 | 0 | 🟡 |
-| Igorrr — Blastbeat Falafel | 97 | 4 | 195,1 | 21,0 | 20,9 | **0** | 0,0 % | 26 ms | 33 ms | 0 | 0 | ✅ |
-| Igorrr — Headbutt | 159 | 18 | 224,5 | 21,1 | 20,9 | **0** | 0,0 % | 22 ms | 22 ms | 0 | 0 | ✅ |
-| Iron Maiden — Fear of the Dark | 127 | 137 | 438,2 | 21,0 | 20,6 | **0** | 0,0 % | 60 ms | 60 ms | 0 | 0 | 🟡 |
-| Led Zeppelin — Immigrant Song | 38 | 64 | 146,8 | 21,0 | 20,9 | **0** | 0,0 % | 22 ms | 22 ms | 0 | 0 | ✅ |
-| Metallica — The Four Horsemen | 179 | 240 | 432,6 | 20,3 | 20,1 | **0** | 0,0 % | 71 ms | 71 ms | 1 | 0 | 🟡 |
-| Metallica — For Whom the Bell Tolls | 66 | 141 | 310,0 | 20,9 | 20,6 | **0** | 0,0 % | 64 ms | 64 ms | 0 | 0 | 🟡 |
-| Renaud — Morgane de toi | 50 | 100 | 373,2 | 21,0 | 16,9 | **0** | 0,0 % | 70 ms | 6 939 ms | 0 | 0 | 🟡 |
-| Sepultura — Amen | 63 | 168 | 267,1 | 20,9 | 20,7 | **0** | 0,0 % | 62 ms | 62 ms | 0 | 0 | 🟡 |
-| Slayer — Hell Awaits | 138 | 149 | 378,1 | 20,6 | 20,4 | **0** | 0,0 % | 60 ms | 60 ms | 1 | 0 | 🟡 |
-| The Offspring — Self Esteem | 51 | 251 | 257,9 | 21,1 | 20,8 | **0** | 0,0 % | 21 ms | 21 ms | 0 | 0 | ✅ |
+| AC/DC — Highway to Hell | 43 | 68 | 310,1 | 20,9 | 19,7 | **0** | 0,0 % | 76 ms | 76 ms | 0 | 0 | 🟡 |
+| Blink 182 — All the Small Things | 53 | 147 | 256,1 | 20,8 | 20,0 | **0** | 0,0 % | 61 ms | 61 ms | 0 | 0 | 🟡 |
+| Europe — The Final Countdown | 103 | 58 | 309,1 | 20,7 | 20,6 | **0** | 0,0 % | 60 ms | 60 ms | 0 | 0 | 🟡 |
+| F-Zero X — Goal BGM | 10 | 14 | 422,1 | 13,9 | 14,6 | **0** | 0,0 % | 6 ms | 6 ms | 0 | 0 | ✅ |
+| Helloween — Dr. Stein | 114 | 112 | 306,4 | 21,1 | 20,8 | **0** | 13,3 % | 70 ms | 159 ms | 0 | 0 | 🟡 |
+| Igorrr — Blastbeat Falafel | 97 | 4 | 195,1 | 20,9 | 20,9 | **0** | 0,0 % | 25 ms | 68 ms | 0 | 0 | ✅ |
+| Igorrr — Headbutt | 159 | 18 | 224,5 | 21,1 | 21,0 | **0** | 0,0 % | 89 ms | 89 ms | 0 | 0 | 🟡 |
+| Iron Maiden — Fear of the Dark | 127 | 137 | 438,2 | 21,2 | 21,0 | **0** | 0,0 % | 23 ms | 23 ms | 0 | 0 | ✅ |
+| Led Zeppelin — Immigrant Song | 38 | 64 | 146,8 | 20,9 | 20,8 | **0** | 0,0 % | 27 ms | 27 ms | 0 | 0 | ✅ |
+| Metallica — The Four Horsemen | 179 | 240 | 432,6 | 21,1 | 21,1 | **0** | 0,0 % | 56 ms | 56 ms | 1 | 0 | 🟡 |
+| Metallica — For Whom the Bell Tolls | 66 | 141 | 310,0 | 21,0 | 20,8 | **0** | 0,0 % | 19 ms | 19 ms | 0 | 0 | ✅ |
+| **Nirvana — Come as you are** | 43 | 65 | 256,1 | 21,1 | 20,0 | **0** | 0,0 % | 78 ms | 78 ms | 0 | 0 | 🟡 |
+| Renaud — Morgane de toi | 50 | 100 | 373,2 | 21,1 | 17,0 | **0** | 0,0 % | 60 ms | 6 978 ms | 0 | 0 | 🟡 |
+| Sepultura — Amen | 63 | 168 | 267,1 | 21,1 | 20,9 | **0** | 0,0 % | 30 ms | 30 ms | 0 | 0 | ✅ |
+| Slayer — Hell Awaits | 138 | 149 | 378,1 | 20,7 | 20,5 | **0** | 0,0 % | 60 ms | 89 ms | 1 | 0 | 🟡 |
+| The Offspring — Self Esteem | 51 | 251 | 257,9 | 21,1 | 21,1 | **0** | 0,0 % | 87 ms | 87 ms | 0 | 0 | 🟡 |
 
 **Ce que ça prouve :**
 
-- **0 écriture de `playbackSpeed` en lecture sur 15/15** — la cible de P2 est
+- **0 écriture de `playbackSpeed` en lecture sur 16/16** — la cible de P2 est
   tenue dans un **navigateur réel** (décodage MP3 réel) et pas seulement dans le
   banc : **aucune coupure du synthé**. C'est l'invariant de premier ordre.
-- **0 erreur console sur 15/15** ; le moteur et la piste audio sont **câblés
+- **0 erreur console sur 16/16** ; le moteur et la piste audio sont **câblés
   partout** (points de synchro > 0, durée audio > 0, audio réellement défilé).
-- **La dérive de croisière reste sous la zone morte** (10-80 ms) : aucun
-  emballement. Le pic de **Renaud (6 939 ms)** n'est **pas** une dérive : c'est
-  la taille d'un **saut de renvoi** (un seul `seek`, signature attendue). Les
-  écritures de taux montent à **13,3 %** sur deux fichiers (Blink, Europe) mais
-  restent sous le seuil (15 %) ; **toutes les autres sont à 0 %**.
-- Les **🟡 (10/15)** signalent seulement l'écart à la cible **stricte** du §6.2
+- **La dérive de croisière reste sous la zone morte** (6-89 ms) : aucun
+  emballement. Le pic de **Renaud (6 978 ms)** n'est **pas** une dérive : c'est
+  la taille d'un **saut de renvoi** (un seul `seek`, signature attendue). Le
+  taux d'écritures de taux dépend du **bruit de la pile audio temps réel** : il
+  monte à **13,3 %** sur un fichier selon l'exécution (Helloween ici, Blink ou
+  Europe à d'autres passes) et reste à **0 %** partout ailleurs.
+- Les **🟡 (9/16)** signalent seulement l'écart à la cible **stricte** du §6.2
   (dérive < 40 ms), cible du banc déterministe ; ce ne sont pas des échecs. Les
-  **✅ (5/15)** — F-Zero X, Igorrr ×2, Led Zeppelin, Offspring — l'atteignent
-  dans le navigateur. Les 2 « arrêts maître » (Four Horsemen, Slayer) restent
-  dans la tolérance (≤ 1).
+  **✅ (7/16)** — F-Zero X, Igorrr ×2, Iron Maiden, Led Zeppelin, For Whom,
+  Sepultura — l'atteignent dans le navigateur. Les 2 « arrêts maître » (Four
+  Horsemen, Slayer) restent dans la tolérance (≤ 1).
+- **Nirvana — Come as you are** (nouvel échantillon) : invariants tenus, et la
+  trace **P3** confirme la convergence de l'oracle en **une** passe —
+  `[oracle] 5 groupe(s) de répétition relevé(s) … clés manquantes 13 → 0`
+  (voir §5.1.1 : c'est ce fichier qui a révélé que `raise` devait itérer).
 - La trace **P3** réapparaît à l'identique (Renaud) :
   `[oracle] P3 renumérotation GP (H1) : 0 mesure(s) réassignée(s) …, 4 rejetée(s)
   par la garde (clés manquantes 55 → 55) — résidu H2`.
 
 ### 2.6 Manifeste & déploiement (P6)
 
-- `samples/list.json` : **14 → 15** entrées via `gen-samples.bat` — l'exemple
-  `Metallica … The Four Horsemen.gp` existait sur disque mais **n'était pas
-  cliquable** (manifeste périmé depuis le commit `e183dcc`) ;
+- `samples/list.json` : **14 → 16** entrées via `gen-samples.bat` — les exemples
+  `Metallica … The Four Horsemen.gp` (présent sur disque mais **pas cliquable**,
+  manifeste périmé depuis `e183dcc`) et `Nirvana … Come as you are.gp` (**ajouté
+  le 16/10/2026**) ;
 - `deploy/_build.ps1` **rejoué** → `deploy/gp8-web/` **conforme** (l'artefact
   datait d'**avant P2**) : `js/repeat-oracle.js` présent, les **8** `js/*.js`
-  **identiques** au dépôt (hash), 15 `.gp`, ni `tools/` ni `*.md` ni
+  **identiques** au dépôt (hash), **16** `.gp`, ni `tools/` ni `*.md` ni
   `node_modules`. Non fait : `deploy/_build.ps1` **ne crée que** `gp8-web/` ;
   `deploy/gp8-web2/` est un artefact antérieur (§5.5).
 
@@ -226,44 +233,76 @@ Chaque impasse a été **tranchée par la mesure**, pas par préférence.
 ### 5.1 Résidu accepté : H2 (donnée GP)
 
 Après P3, il reste des clés de synchro qu'**aucun** appariement ne peut couvrir
-— **72 clés** au total, **100 % classées** :
+— **70 clés** au total, **100 % classées** :
 
 | Fichier | Clés manquantes | Nature |
 |---|---|---|
-| **Renaud** | 55 (33 mesures **H2** + 4 mesures **H1 refusées**) | GP enregistre plus de traversées que la partition n'en note |
-| **AC/DC** | 12 (6 mesures H2 : mes 5-8, 12-13) | idem |
-| **The Offspring** | 5 (2 mesures H2 : mes 18-19) | idem |
+| **Renaud** | 55 (33 mesures **H2** + 4 mesures **H1 refusées** : M.9, M.10, M.12, M.43) | GP enregistre plus de traversées que la partition n'en note |
+| **AC/DC** | 12 (6 mesures H2 : M.6-9, M.13-14) | idem |
+| **The Offspring** | 5 (2 mesures H2 : M.19-20) | idem |
 
-Les **12** autres fichiers ont **0** clé manquante. La **clause « sinon »** de la
+Les **13** autres fichiers ont **0** clé manquante. La **clause « sinon »** de la
 DoD #5 est donc invoquée : anomalie de **données GP** documentée et acceptée,
 sans impact audible jugé bloquant — **sous réserve de l'écoute** (§5.2).
 
-### 5.2 Écoute humaine — les 15 points
+> **Numérotation** : `M. n` = numéro **affiché par l'app** (indicateur `M. n/N`),
+> soit *index de mesure + 1*. Une **anacrouse** est donc `M. 1`, jamais « M. 0 ».
+
+#### 5.1.1 Relèvement des répétitions : convergence en plusieurs passes
+
+`RepeatOracle.raise()` relève les répétitions **groupe par groupe**, à partir de
+la carte des clés manquantes du **déroulé courant**. Or relever un groupe change
+le déroulé, donc cette carte : un groupe **rejeté** à un tour peut devenir
+**gagnant** au tour suivant.
+
+Mesuré le 16/10/2026 sur les **16** échantillons : **15 convergent en une passe**,
+mais **Nirvana — Come as you are** en exige **deux** — ce morceau, ajouté au
+manifeste le jour même, a mis en défaut l'**idempotence** exigée par
+`tools/repeat-check.js` (« un second `raise` ne doit rien relever »).
+`raise` **itère donc jusqu'au point fixe** (plafond `RAISE_MAX_PASSES = 4`),
+chaque relèvement conservant ses gardes.
+
+| Effet mesuré | Avant | Après |
+|---|---|---|
+| Nirvana — clés manquantes | 2 (13 → 2) | **0** (13 → 0) |
+| Nirvana — sauts / pentes hors borne | 1 / 0 | **1 / 0** (inchangé) |
+| Les 15 autres fichiers | — | **strictement identiques** (mêmes métriques, mêmes traces) |
+
+Aucun relèvement n'est accepté s'il **augmente** les sauts, sort une pente de
+`[0,5 ; 2]` ou fait **reculer** un segment d'audio : la convergence ne peut donc
+**que** couvrir davantage de clés GPIF, jamais dégrader la synchro.
+
+### 5.2 Écoute humaine — les 16 points
 
 > Protocole : `python -m http.server 8777 --bind 127.0.0.1` →
 > `http://localhost:8777/`, mode **mix** (MIDI + MP3), vitesse **×1,0**. Noter
 > *tempo* (le MIDI suit-il l'enregistrement ?) et *phase* (les deux flux restent
 > collés ?), puis confronter à la console `[mix-stats]`.
+>
+> **Numérotation** : les zones ci-dessous sont données en **`M. n`** = numéro
+> **affiché par l'app** (`index + 1`) ; une **anacrouse** est donc **M. 1**.
+> Les horodatages sont ceux de l'app.
 
 | # | Échantillon | Zone | Attendu |
 |---|---|---|---|
-| M1 | Iron Maiden | intro 0:00-0:30 | intro lente sans à-coups |
-| M2 | Iron Maiden | riffs 2:01-4:11 | pas de « début trop rapide » |
-| M3 | Iron Maiden | mesure 98 | pas de saut, pas de flottement |
-| M4 | Dr. Stein | mes 16-19 | **plus aucun retour en arrière** |
-| M5 | Dr. Stein | tout | 0 coupure |
-| M6 | AC/DC | fin mes 17 ≈ 1:03 | **un seul** saut propre |
-| M7 | AC/DC | mes 6-10 | pas de saut parasite (l'écart MIDI/audio = **donnée GP**) |
-| M8 | Renaud | début mes 1-6 | séquence `1 2 3 4 · 1 2 3 5 · 1 2 3 6` |
-| M9 | Renaud | mes 15-21 | les 4 fins dans l'ordre |
-| M10 | Blink 182 | mes 6-10 | `6-7-8-9` ×3 puis `6-7-8-10` |
-| M11 | Slayer | ≈ 1:00 | 0 saccade ; MP3 calé à 1:04,7 |
-| M12 | Slayer | mes 44, 53, 117 | tous les passages |
-| M13 | Offspring | ≈ 0:51 | plus de saut parasite |
+| M1 | Iron Maiden | intro (≈ 0:25, **M.4-M.6**) | bascule intro lente → riff sans trou ni décalage |
+| M2 | Iron Maiden | riffs 1:00-4:11 | pas de « début trop rapide » |
+| M3 | Iron Maiden | voltes **M.4/5 · M.15-17 · M.21/22** | fins jouées dans l'ordre (dont la **fin 3 : M.16**) |
+| M4 | Dr. Stein | reprises **M.16-19** | **plus aucun retour en arrière** |
+| M5 | Dr. Stein | anacrouse **M.1** + tout | la pickup vide dure 1 599 ms ; 0 coupure |
+| M6 | AC/DC | **M.9 → M.10** ≈ 1:18 | **un seul** saut propre |
+| M7 | AC/DC | anacrouse **M.1** ; H2 **M.6-9, M.13-14** | pickup en phase ; pas de saut parasite (l'écart MIDI/audio = **donnée GP**) |
+| M8 | Renaud | **M.1-5** puis volta **M.18-21** | les fins dans l'ordre, y compris la **volta à 4 fins** |
+| M9 | Renaud | **M.37 → M.38** ≈ 3:42 | grand saut de renvoi : **un seul** saut |
+| M10 | Blink 182 | **M.6-10** | `M.6-7-8-9` ×3 puis `M.6-7-8-10` |
+| M11 | Slayer | ≈ 1:00 | 0 saccade |
+| M12 | Slayer | voltes **M.48/49 · M.55/56 · M.61/62 · M.108/109 · M.114/115 · M.119/120** | toutes les fins, dans l'ordre |
+| M13 | Offspring | ≈ 0:51 ; H2 **M.19-20** | plus de saut parasite |
 | M14 | Offspring | tout | 0 coupure |
 | M15 | **Témoins** : Europe, F-Zero X, Led Zeppelin, Sepultura, Metallica ×2, Igorrr ×2 | tout | aucune régression |
+| M16 | **Nirvana** | anacrouse **M.1** ; **volta à 8 fins M.4-6** ; **M.38-40** | pickup en phase ; le couplet joué **8 fois** (7 fins sur M.5 + la 8ᵉ sur M.6) ; fin non tronquée |
 
-**Contrôle transverse** (sur M1, M4, M6, M14) : passer la vitesse **×0,5 puis
+**Contrôle transverse** (sur M1, M5, M7, M14) : passer la vitesse **×0,5 puis
 ×1,5** en cours de lecture → le moteur doit composer vitesse utilisateur × tempo
 pré-cuit **sans trou ni décalage**.
 
@@ -283,8 +322,9 @@ persiste ⇒ chemin **MIDI** ; couper le master MIDI → s'il persiste ⇒ chemi
 > **antérieures** au correctif P2 (2026-10-02), conservées **verbatim** — elles
 > ne valident pas le correctif. `[ ]` → `OK` / `KO` + une ligne.
 
-**1. ACDC — Highway to Hell** · §5.2 M6, M7 · 68 points · résidu 12 clés / 6 mes H2
-- [ ] M6 : un seul saut propre à 1:03 ; MP3 alors vers 1:10-1:11 (**normal**).
+**1. ACDC — Highway to Hell** · §5.2 M6, M7 · 68 points · résidu 12 clés / 6 mes H2 (M.6-9, M.13-14)
+- [ ] M6 : un seul saut propre (≈ 1:18, **M.9 → M.10**) ; l'audio correspondant se
+  situe ailleurs dans le MP3 (**normal**, donnée GP).
 - [ ] M7 : MIDI correct, aucun **saut parasite** ajouté (l'écart est la donnée GP).
 - note (2026-10-02) : « renvoi sembgle correct !!!! / Audio ok »
 
@@ -300,8 +340,8 @@ persiste ⇒ chemin **MIDI** ; couper le master MIDI → s'il persiste ⇒ chemi
 **5. Helloween — Dr. Stein** · M4, M5 · 112 points · résidu 0
 - [ ] M4 : **plus aucun retour** ; tempo constant ≈ 1,22×.
 - [ ] M5 : 0 coupure.
-- note : la mesure **0** est **VIDE** dans le `.gp` ; sa durée ne vient que de
-  l'audio (une mesure pleine, 1 599 ms). · note : « Qualité mp3 ok et vitesse ok »
+- note : la mesure **M.1** (anacrouse) est **VIDE** dans le `.gp` ; sa durée ne
+  vient que de l'audio (une mesure pleine, 1 599 ms). · note : « Qualité mp3 ok et vitesse ok »
 
 **6. Igorrr — Blastbeat Falafel** *(témoin)* · M15 · 4 points · résidu 0 — [ ] identique
 
@@ -330,15 +370,21 @@ persiste ⇒ chemin **MIDI** ; couper le master MIDI → s'il persiste ⇒ chemi
 **13. Sepultura — Amen** *(témoin)* · M15 · 168 points · résidu 0 — [ ] identique
 
 **14. Slayer — Hell Awaits** · M11, M12 · 149 points · résidu 0
-- [ ] M11 : 0 saccade ; démarrage audio calé à 1:04,7.
-- [ ] M12 : tous les passages.
+- [ ] M11 : 0 saccade.
+- [ ] M12 : tous les passages — voltes M.48/49 · M.55/56 · M.61/62 · M.108/109 · M.114/115 · M.119/120.
 - (les 4 segments de pont à pente extrême 0,50-0,69× ont disparu)
 
-**15. The Offspring — Self Esteem** · M13, M14 · 251 points · résidu 5 clés / 2 mes H2
+**15. The Offspring — Self Esteem** · M13, M14 · 251 points · résidu 5 clés / 2 mes H2 (M.19-20)
 - [ ] M13 : plus de saut parasite. · [ ] M14 : 0 coupure.
 - [ ] transverse ×0,5 / ×1,5
 
-**Synthèse** — [ ] M15 témoins identiques · [ ] transverse (M1, M4, M6, M14) ·
+**16. Nirvana — Come as you are** *(ajouté au manifeste le 16/10/2026)* · M16 · 65 points · résidu **0**
+- [ ] M16 : anacrouse **M.1** en phase ; **volta à 8 fins** (couplet **M.4-6** joué **8 fois**) ;
+  volta à 6 fins **M.38-40** ; fin **non tronquée** (arrêt ≈ 3:36, musique jusqu'à ≈ 3:39).
+- note : c'est ce morceau qui a fait **durcir l'oracle de renvoi** (§5.1.1) —
+  `[oracle] … clés manquantes 13 → 0`.
+
+**Synthèse** — [ ] M15 témoins identiques · [ ] transverse (M1, M5, M7, M14) ·
 [ ] validation mobile (§7). Journal rempli le : ...... / ...... / ......
 
 ### 5.4 Validation mobile
@@ -364,14 +410,15 @@ Google **Pixel 7a** (viewport CSS 412 × 915 portrait / 915 × 412 paysage) — 
    permanent ; `|playbackRate − 1| ≤ 0,5 %` hors correction transitoire). ✅
 4. **Structure** : `0` recadrage de dérive ; `1` saut propre par discontinuité
    voulue ; `0` pente hors `[0,5 ; 2]`. ✅
-5. **Données** : `0` clé GPIF manquante sur les 15 → **clause « sinon »
-   invoquée** (72 clés, **100 %** classées H2/H1, §5.1) ; le mécanisme de
-   réassignation H1 reste **actif sous garde**. ✅
+5. **Données** : après relèvement, **13 des 16** fichiers n'ont plus **aucune**
+   clé GPIF manquante ; les **3** autres (Renaud, AC/DC, Offspring) laissent
+   **70 clés** → **clause « sinon » invoquée** (100 % classées H2/H1, §5.1) ; le
+   mécanisme de réassignation H1 reste **actif sous garde**. ✅
 6. **Durée** : fin de webapp = fin du MP3 à ±0,5 % au sens utile — la webapp ne
-   dépasse **jamais** la fin du MP3 (15/15) ; anacrouse alignée à ≤ 0,04 %. ✅
-7. **Tests** : `node tools/test-all.js` sort `0` (**8** harnais) ; aucun harnais
-   « miroir » ; `deploy/` régénéré et conforme. ✅
-8. **Écoute** : les 15 points du §5.2 validés (dont les témoins sans régression). ⏳
+   dépasse **jamais** la fin du MP3 (16/16) ; anacrouse alignée à ≤ 0,04 % (7/7). ✅
+7. **Tests** : `node tools/test-all.js` sort `0` (**8** harnais) ; navigateur réel
+   **16/16** verts ; aucun harnais « miroir » ; `deploy/` régénéré et conforme. ✅
+8. **Écoute** : les 16 points du §5.2 validés (dont les témoins sans régression). ⏳
 
 ### 6.1 Principe directeur des tests
 
@@ -454,7 +501,7 @@ powershell -File deploy/_build.ps1      # reconstruit deploy/gp8-web/
 
 cd tools/browser && npm i               # playwright-core (devDependency LOCALE, isolée)
 npm test                                # 3 exemples (~2 min)
-npm run test:all                        # les 15 exemples (~10 min)
+npm run test:all                        # les 16 exemples (~10 min)
 node run.js --headed --verbose          # navigateur visible, journal complet
 ```
 

@@ -22,7 +22,7 @@ Ce test est la seule exception, et elle est confinée :
 cd tools/browser
 npm i          # installe playwright-core (léger : pas de Chromium embarqué)
 npm test       # 3 exemples représentatifs (Sepultura, Dr. Stein, Renaud) ~2 min
-npm run test:all          # les 15 exemples du manifeste ~10 min
+npm run test:all          # les 16 exemples du manifeste ~10 min
 node run.js --headed      # navigateur visible (débogage, audio réel)
 node run.js --sample Renaud --seconds 15 --verbose
 ```

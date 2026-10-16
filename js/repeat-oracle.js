@@ -44,6 +44,8 @@
 
   /* index de mesure → dernière occurrence jouée, rempli par install() */
   const walkMaxOcc = new Map();
+  /* plafond de tours de relèvement dans `raise` (mesuré : 2 au plus) */
+  const RAISE_MAX_PASSES = 4;
   let installed = false;
   /* dernier rapport de `raise` (instrumentation P3, lu par les outils) */
   let report = null;
@@ -223,57 +225,73 @@
       if (!cur.nc) return 0;            // toutes les clés GPIF sont couvertes
       const nc0 = cur.nc;
 
-      /* mesures dont AU MOINS UNE clé GPIF manque : seuls les groupes qui les
-         contiennent peuvent gagner quelque chose (la règle 1 rejette les
-         autres), ce qui évite de re-passer le score pour rien. */
-      const missBars = new Set();
-      for (const k of gpKeys) {
-        const d = k.lastIndexOf('.');
-        const b = Number(k.slice(0, d));
-        const seen = walkMaxOcc.get(b);
-        if (seen === undefined || seen < Number(k.slice(d + 1))) missBars.add(b);
-      }
-
-      /* ---- 3. groupes à fermeture UNIQUE : les groupes à fins multiples
-              sont déjà pilotés par normalizeMultiClosingRepeats et ne doivent
-              pas être touchés une seconde fois ---- */
-      const groups = [], seenGroups = new Set();
-      for (const mb of mbs) {
-        if (!mb.isRepeatEnd) continue;
-        const g = mb.repeatGroup;
-        if (!g || !g.isClosed || !g.closings || g.closings.length !== 1) continue;
-        if (seenGroups.has(g)) continue;
-        seenGroups.add(g);
-        groups.push(g);
-      }
-
+      /* ---- 3. relèvement des répétitions, JUSQU'AU POINT FIXE ----------
+         Un relèvement change le déroulé réel, donc la carte des clés
+         manquantes : un groupe rejeté à un tour peut devenir gagnant au tour
+         suivant. Mesuré (16/10/2026, 16 échantillons) : 15 convergent en UNE
+         passe, « Nirvana — Come as you are » en DEUX (clés 2 → 0, mêmes
+         pentes et mêmes sauts : strictement mieux, jamais de perte). On itère
+         donc jusqu'à ce qu'aucun groupe ne soit relevé, sous un plafond de
+         sécurité ; chaque relèvement garde ses gardes, et les groupes à fins
+         multiples restent pilotés par normalizeMultiClosingRepeats (jamais
+         touchés ici). */
       let raised = 0;
-      for (const g of groups) {
-        if (cur.nc === 0) break;                // plus rien à couvrir
-        const members = (g.masterBars && g.masterBars.length)
-          ? g.masterBars
-          : mbs.filter(b => b.repeatGroup === g);
-        if (!members.some(b => missBars.has(b.index))) continue;
+      for (let pass = 1; pass <= RAISE_MAX_PASSES && cur.nc; pass++) {
+        /* mesures dont AU MOINS UNE clé GPIF manque : seuls les groupes qui
+           les contiennent peuvent gagner quelque chose (la règle 1 rejette
+           les autres), ce qui évite de re-passer le score pour rien. */
+        const missBars = new Set();
+        for (const k of gpKeys) {
+          const d = k.lastIndexOf('.');
+          const b = Number(k.slice(0, d));
+          const seen = walkMaxOcc.get(b);
+          if (seen === undefined || seen < Number(k.slice(d + 1))) missBars.add(b);
+        }
 
-        const closing = g.closings[0];
-        const saved = closing.repeatCount;
-        let best = null, bestRc = saved;
-        for (let cnt = saved + 1; cnt <= saved + 4; cnt++) {
-          closing.repeatCount = cnt;
-          const m = measure();
-          if (m.nc < cur.nc && m.danger <= cur.danger && m.jumps <= cur.jumps &&
-              (!best || m.nc < best.nc)) {
-            best = m; bestRc = cnt;
+        /* groupes à fermeture UNIQUE : les groupes à fins multiples sont déjà
+           pilotés par normalizeMultiClosingRepeats et ne doivent pas être
+           touchés une seconde fois */
+        const groups = [], seenGroups = new Set();
+        for (const mb of mbs) {
+          if (!mb.isRepeatEnd) continue;
+          const g = mb.repeatGroup;
+          if (!g || !g.isClosed || !g.closings || g.closings.length !== 1) continue;
+          if (seenGroups.has(g)) continue;
+          seenGroups.add(g);
+          groups.push(g);
+        }
+
+        let raisedThisPass = 0;
+        for (const g of groups) {
+          if (cur.nc === 0) break;              // plus rien à couvrir
+          const members = (g.masterBars && g.masterBars.length)
+            ? g.masterBars
+            : mbs.filter(b => b.repeatGroup === g);
+          if (!members.some(b => missBars.has(b.index))) continue;
+
+          const closing = g.closings[0];
+          const saved = closing.repeatCount;
+          let best = null, bestRc = saved;
+          for (let cnt = saved + 1; cnt <= saved + 4; cnt++) {
+            closing.repeatCount = cnt;
+            const m = measure();
+            if (m.nc < cur.nc && m.danger <= cur.danger && m.jumps <= cur.jumps &&
+                (!best || m.nc < best.nc)) {
+              best = m; bestRc = cnt;
+            }
+            if (best && best.nc === 0 && best.danger === 0) break;
           }
-          if (best && best.nc === 0 && best.danger === 0) break;
+          if (best) {
+            closing.repeatCount = bestRc;       // retenu : prouvé, jamais de perte
+            cur = best;
+            raised++; raisedThisPass++;
+          } else {
+            closing.repeatCount = saved;        // rejeté : sans effet ou nuisible
+          }
         }
-        if (best) {
-          closing.repeatCount = bestRc;         // retenu : prouvé, jamais de perte
-          cur = best;
-          raised++;
-        } else {
-          closing.repeatCount = saved;          // rejeté : sans effet ou nuisible
-        }
+
+        if (!raisedThisPass) break;             // point fixe atteint
+        cur = measure();                        // état RÉEL avant le tour suivant
       }
 
       if (raised && trace) {
