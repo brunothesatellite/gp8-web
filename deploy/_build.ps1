@@ -4,15 +4,16 @@
 # Tout est copie SAUF ce que le navigateur ne demande jamais :
 #   excludeDirs  -> .git, deploy (evite la recursion dans la sortie),
 #                   tools (test de chargement local), node_modules, .opencode
-#   excludeFiles -> *.md (BUG.md, promp.md, RESPONSIVE.md), .gitignore,
+#   excludeFiles -> *.md (BUGFIX-TOTAL.md, TESTLOG.md), TESTLOG.html
+#                   (outils de travail locaux), .gitignore,
 #                   gen-samples.bat (outil local), ordures Windows
-# Reste : index.html, css/, js/, samples/ (14 .gp + list.json), favicon*.
+# Reste : index.html, css/, js/, samples/ (15 .gp + list.json), favicon*.
 
 $deployDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $src = Split-Path -Parent $deployDir
 
 $excludeDirs = @('.git', 'deploy', 'tools', 'node_modules', '.opencode')
-$excludeFiles = @('*.md', '.gitignore', '.DS_Store', 'Thumbs.db', '*.log', 'gen-samples.bat')
+$excludeFiles = @('*.md', 'TESTLOG.html', '.gitignore', '.DS_Store', 'Thumbs.db', '*.log', 'gen-samples.bat')
 
 function Test-Excluded($rel) {
   $parts = $rel.Replace('/', '\').Split('\')

@@ -5,8 +5,9 @@
 > `BUGLATEST.md`, `RESPONSIVE.md`, `TESTSAMPLES.md`, `promp.md`, `TODO.md`
 > — tous supprimés le 2026-10-16 ; leur détail intégral reste dans l'historique
 > git. Autres documents du dépôt : **`TESTLOG.md`** (journal de test d'écoute à
-> remplir — version **opérationnelle** du §5.2/§5.3) et
-> **`tools/browser/README.md`** (harnais navigateur).
+> remplir — version **opérationnelle** du §5.2/§5.3), **`TESTLOG.html`** (éditeur
+> local du journal, hors ligne, sans dépendance) et **`tools/browser/README.md`**
+> (harnais navigateur).
 >
 > **Nature** : les correctifs **P0 → P6 sont livrés et vérifiés**. Il ne reste que
 > des étapes **humaines** : l'**écoute** (§5.2) et la **validation mobile** (§7).

@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TESTLOG.md — éditeur du journal d'écoute (GP8-Web)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --fg:#1c2128; --mut:#5b6472; --line:#d8dde4; --card:#fff;
+    --pri:#1f6feb; --pri-fg:#fff; --ok:#1a7f37; --warn:#9a6700; --bad:#cf222e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.45 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  code,pre,.mono{font-family:"Cascadia Mono",Consolas,"SF Mono",Menlo,monospace}
+  header{position:sticky;top:0;z-index:20;background:rgba(246,247,249,.96);
+         backdrop-filter:blur(6px);border-bottom:1px solid var(--line);padding:10px 18px}
+  h1{margin:0 0 8px;font-size:16px}
+  h1 small{color:var(--mut);font-weight:400}
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  button{font:inherit;padding:6px 12px;border:1px solid var(--line);border-radius:6px;
+         background:#fff;cursor:pointer}
+  button:hover{background:#f0f3f7}
+  button.primary{background:var(--pri);color:var(--pri-fg);border-color:var(--pri)}
+  button.primary:hover{filter:brightness(1.08)}
+  button.ghost{color:var(--mut)}
+  .mode,.status{color:var(--mut);font-size:12px}
+  .status.ok{color:var(--ok)} .status.bad{color:var(--bad)}
+  .progress{display:flex;align-items:center;gap:10px;margin-top:8px}
+  .bar{flex:1;max-width:420px;height:8px;background:#e6eaf0;border-radius:99px;overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:var(--ok);transition:width .15s}
+  #progtext{font-size:12px;color:var(--mut)}
+  details.preview{margin-top:8px}
+  details.preview summary{cursor:pointer;font-size:12px;color:var(--mut)}
+  details.preview pre{max-height:320px;overflow:auto;background:#0d1117;color:#c9d1d9;
+       padding:12px;border-radius:8px;font-size:12px;white-space:pre-wrap}
+  main{max-width:1180px;margin:0 auto;padding:18px}
+  section.card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+       padding:14px 16px;margin:0 0 16px}
+  section.card>h2{margin:0 0 10px;font-size:15px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  details.song{background:var(--card);border:1px solid var(--line);border-radius:10px;
+       margin:0 0 10px}
+  details.song>summary{cursor:pointer;padding:10px 14px;font-weight:600;list-style:none;
+       display:flex;align-items:center;gap:10px}
+  details.song>summary::-webkit-details-marker{display:none}
+  details.song>summary:before{content:"▸";color:var(--mut)}
+  details.song[open]>summary:before{content:"▾"}
+  .songbody{padding:0 14px 14px}
+  .ctx{color:var(--mut);font-size:12px;margin:0 0 10px}
+  .ctx b{color:var(--fg)}
+  .badge{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:1px 8px;
+       background:#f0f3f7;color:var(--mut);margin-left:auto}
+  .badge.v{background:#e6f4ea;border-color:#b7e0c4;color:var(--ok)}
+  table.ft{width:100%;border-collapse:collapse;font-size:13px;margin:0 0 10px}
+  table.ft th,table.ft td{border:1px solid var(--line);padding:4px 6px;vertical-align:top;text-align:left}
+  table.ft th{background:#f2f5f9;font-size:12px;color:var(--mut);font-weight:600}
+  table.ft td.attendu{color:#333;max-width:460px}
+  table.ft td.n{width:26px;color:var(--mut)}
+  table.ft td.rep{white-space:nowrap}
+  input[type=text],select,textarea{font:inherit;padding:3px 6px;border:1px solid var(--line);
+       border-radius:5px;background:#fff;width:100%;min-width:60px}
+  textarea{resize:vertical;min-height:34px}
+  select.verd{min-width:96px}
+  .line{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin:6px 0}
+  .lbl{color:var(--mut);font-size:12px;white-space:nowrap}
+  .line input[type=text]{width:auto;min-width:120px;flex:0 1 200px}
+  .line input.num{min-width:70px;max-width:90px}
+  .grid{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}
+  .grid label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--mut)}
+  .grid select{width:auto;min-width:64px}
+  .vbtns{display:flex;gap:4px}
+  .vbtn{padding:2px 9px;border-radius:6px}
+  .vbtn.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+  .chk{display:flex;gap:8px;align-items:flex-start;margin:5px 0;font-size:13px}
+  .chk input{margin-top:3px}
+  .hint{color:var(--mut);font-size:12px;margin:4px 0 8px}
+  .row{display:flex;gap:8px;align-items:center;margin:5px 0;flex-wrap:wrap}
+  .row .lbl{min-width:150px}
+  .add{background:#f0f3f7}
+  @media print{header{position:static}.toolbar,details.preview,button{display:none}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>TESTLOG.md <small>— éditeur du journal d'écoute GP8-Web</small></h1>
+  <div class="toolbar">
+    <button id="btnOpen">Ouvrir TESTLOG.md</button>
+    <button id="btnExport" class="primary">Exporter → TESTLOG.md</button>
+    <button id="btnReset" class="ghost">Réinitialiser</button>
+    <span id="mode" class="mode"></span>
+    <span id="status" class="status"></span>
+  </div>
+  <div class="progress">
+    <div class="bar"><i id="barfill"></i></div>
+    <span id="progtext">0/15 fiches conclues</span>
+  </div>
+  <details class="preview">
+    <summary>Aperçu du markdown exporté</summary>
+    <pre id="preview"></pre>
+  </details>
+</header>
+
+<main id="app"></main>
+<input type="file" id="fileInput" accept=".md,text/markdown" hidden>
+
+<script>
+'use strict';
+/* =====================================================================
+   TESTLOG.html — éditeur du journal d'écoute (GP8-Web)
+   Fichier unique, hors ligne, aucune dépendance.
+   Principe : parse le markdown en un modèle, rend un formulaire,
+   puis réécrit UNIQUEMENT les lignes éditées (round-trip chirurgical).
+   ===================================================================== */
+
+var CHK = '\u2610';        // ☐
+var CHK_ON = '\u2611';     // ☑
+var U12 = '____________';
+var U6 = '______';
+
+var state = { lines: [], eol: '\n', original: '', handle: null, fileName: 'TESTLOG.md' };
+var model = null;
+
+/* ---------------------- helpers ---------------------- */
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+  return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+function mdInline(s){
+  var t = esc(s);
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  t = t.replace(/(^|[^*])\*([^*]+)\*/g, '$1<i>$2</i>');
+  t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+  return t;
+}
+function isRow(l){ return /^\s*\|.*\|\s*$/.test(l); }
+function isSep(l){ return /^\s*\|[\s:|\-]+\|\s*$/.test(l); }
+function partsOf(l){ return l.split('|'); }
+function cellsOf(l){ var p = partsOf(l); return p.slice(1, -1); }
+function pick(changed, raw, gen){ return changed ? gen : raw; }
+function isPlaceholder(v){ return !v || /^_+$/.test(v); }
+
+/* ---------------------- parsing ---------------------- */
+function scanTables(lines){
+  var out = [], fence = false;
+  for (var i = 0; i < lines.length; i++){
+    if (/^\s*```/.test(lines[i])){ fence = !fence; continue; }
+    if (fence) continue;
+    if (isRow(lines[i]) && i + 1 < lines.length && isSep(lines[i + 1])){
+      var rowLis = [], j = i + 2;
+      while (j < lines.length && isRow(lines[j])){ rowLis.push(j); j++; }
+      out.push({ headerLi: i, rowLis: rowLis, header: lines[i] });
+      i = j - 1;
+    }
+  }
+  return out;
+}
+
+function parse(text){
+  var eol = /\r\n/.test(text) ? '\r\n' : '\n';
+  var lines = text.split(/\r?\n/);
+  state.lines = lines; state.eol = eol; state.original = text;
+
+  model = { prep: [], songs: [], synthesis: null, anomalies: null,
+            x1: null, x2: null, campaign: null, tester: null };
+
+  var section = '', fence = false, song = null;
+
+  for (var i = 0; i < lines.length; i++){
+    var l = lines[i], m;
+
+    if (/^\s*```/.test(l)){ fence = !fence; continue; }
+    if (fence) continue;
+
+    if ((m = l.match(/^##\s+(\d+)\./))){ section = m[1]; song = null; continue; }
+
+    if ((m = l.match(/^###\s+5\.(\d+)\s*·\s*(.*)$/))){
+      song = { num: +m[1], title: m[2].trim(), li: i, open: false,
+               file: '', angle: '', machine: '', rows: [],
+               grid: null, console: null, verdict: null, notes: null };
+      model.songs.push(song);
+      continue;
+    }
+
+    if (song){
+      if (!song.file && (m = l.match(/^`([^`]+\.gp[x]?)`\s*$/))){ song.file = m[1]; continue; }
+      if ((m = l.match(/^\*\*Angle\*\*\s*:\s*(.*)$/))){ song.angle = m[1]; continue; }
+      if ((m = l.match(/^\*\*Machine\*\*\s*:\s*(.*)$/))){ song.machine = m[1]; continue; }
+      if ((m = l.match(/^\*\*Grille commune\*\*\s*:\s*(.*)$/))){
+        var vals = [];
+        for (var k = 1; k <= 7; k++){
+          var g = l.match(new RegExp('T' + k + '\\s*([^\\s\u00b7]*)'));
+          vals.push(g && g[1] ? g[1] : CHK);
+        }
+        song.grid = { li: i, raw: l, vals: vals, init: vals.slice() };
+        continue;
+      }
+      if (/^\*\*Console\*\*\s*:/.test(l)){
+        song.console = { li: i, raw: l, mix: '', drift: '', oracle: '' };
+        song.console.init = { mix: '', drift: '', oracle: '' };
+        continue;
+      }
+      if ((m = l.match(/^\*\*Verdict morceau\*\*\s*:\s*(.*)$/))){
+        var body = m[1];
+        var v = '';
+        var opts = ['\u2705', '\ud83d\udfe1', '\u274c', '?'];
+        for (var q = 0; q < opts.length; q++){
+          if (new RegExp(CHK_ON + '\\s*' + (opts[q] === '?' ? '\\?' : opts[q])).test(body)){ v = opts[q]; }
+        }
+        var am = body.match(/Anomalie\(s\)\s*n\u00b0\s*(.*)$/);
+        var anom = am ? am[1].trim() : '';
+        if (isPlaceholder(anom)) anom = '';
+        song.verdict = { li: i, raw: l, val: v, anom: anom, init: { val: v, anom: anom } };
+        continue;
+      }
+      if ((m = l.match(/^\*\*Notes\*\*\s*:\s*(.*)$/))){
+        var nv = m[1].trim(); if (isPlaceholder(nv)) nv = '';
+        song.notes = { li: i, raw: l, val: nv, init: nv };
+        continue;
+      }
+    }
+
+    if (section === '3'){
+      if ((m = l.match(/^(\s*)- \[( |x)\]\s+(.*)$/))){
+        var item = { li: i, indent: m[1], checked: m[2] === 'x', text: m[3], raw: l };
+        item.init = item.checked;
+        if (/^Version test\u00e9e/.test(item.text)){
+          item.isVersion = true;
+          var cm = item.text.match(/commit `([^`]*)`/); item.commit = cm ? cm[1] : '';
+          var nm = item.text.match(/Navigateur\/OS : `([^`]*)`/); item.nav = nm ? nm[1] : '';
+          item.initCommit = item.commit; item.initNav = item.nav;
+          var nx = lines[i + 1] || '';
+          var dm = nx.match(/^(\s*)\u00b7\s*Date\s*:\s*`([^`]*)`/);
+          item.dateLi = dm ? i + 1 : -1;
+          item.dateIndent = dm ? dm[1] : '      ';
+          item.dateRaw = nx; item.date = dm ? dm[2] : ''; item.initDate = item.date;
+        }
+        model.prep.push(item);
+        continue;
+      }
+    }
+
+    if ((m = l.match(/^(\s*)\u2192\s*X1\s*:\s*(.*)$/))){
+      var x1b = m[2];
+      var xv = new RegExp(CHK_ON + '\\s*conforme').test(x1b) ? 'conforme'
+         : new RegExp(CHK_ON + '\\s*r\u00e9serve').test(x1b) ? 'r\u00e9serve'
+         : new RegExp(CHK_ON + '\\s*d\u00e9faut').test(x1b) ? 'd\u00e9faut' : '';
+      var xn = (x1b.match(/notes\s*:\s*(.*)$/) || [])[1] || '';
+      xn = xn.trim(); if (isPlaceholder(xn)) xn = '';
+      model.x1 = { li: i, indent: m[1], raw: l, verdict: xv, notes: xn, init: { verdict: xv, notes: xn } };
+      continue;
+    }
+    if ((m = l.match(/^(\s*)\u2192\s*X2\s*:\s*(.*)$/))){
+      var x2b = m[2];
+      var na = new RegExp(CHK_ON + '\\s*non requis').test(x2b);
+      var xr = (x2b.match(/r\u00e9sultat\s*:\s*(.*)$/) || [])[1] || '';
+      xr = xr.trim(); if (isPlaceholder(xr)) xr = '';
+      model.x2 = { li: i, indent: m[1], raw: l, na: na, result: xr, init: { na: na, result: xr } };
+      continue;
+    }
+    if ((m = l.match(/^\*\*D\u00e9cision de campagne\*\*\s*:\s*(.*)$/))){
+      var cb = m[1], dec = '';
+      if (new RegExp(CHK_ON + '\\s*\\*\\*valid\u00e9e\\*\\*').test(cb)) dec = 'valid\u00e9e';
+      else if (new RegExp(CHK_ON + '\\s*valid\u00e9e\\s*\\*\\*avec r\u00e9serves\\*\\*').test(cb)) dec = 'r\u00e9serves';
+      else if (new RegExp(CHK_ON + '\\s*\\*\\*d\u00e9fauts').test(cb)) dec = 'd\u00e9fauts';
+      model.campaign = { li: i, raw: l, val: dec, init: dec };
+      continue;
+    }
+    if ((m = l.match(/^\*\*Testeur\*\*\s*:\s*(.*)$/))){
+      var tb = m[1];
+      var tm = tb.match(/^(.*?)\s*\*\*Date\*\*\s*:\s*(.*)$/);
+      var tval = tm ? tm[1].trim() : '', dval = tm ? tm[2].trim() : '';
+      if (isPlaceholder(tval)) tval = '';
+      if (isPlaceholder(dval)) dval = '';
+      model.tester = { li: i, raw: l, tester: tval, date: dval, init: { tester: tval, date: dval } };
+      continue;
+    }
+  }
+
+  /* tables */
+  var tables = scanTables(lines);
+  for (var t = 0; t < tables.length; t++){
+    var tb = tables[t], h = tb.header;
+    if (/Relev\u00e9/.test(h) && /Verdict/.test(h) && !/Reproductible/.test(h)){
+      var owner = null;
+      for (var si = 0; si < model.songs.length; si++){
+        if (model.songs[si].li < tb.headerLi &&
+            (!owner || model.songs[si].li > owner.li)) owner = model.songs[si];
+      }
+      if (!owner) continue;
+      owner.rows = tb.rowLis.map(function(li){
+        var p = partsOf(lines[li]);
+        var rel = p[p.length - 3].trim();
+        var ver = p[p.length - 2].trim();
+        return { li: li, p: p, raw: lines[li], releve: rel, verdict: ver,
+                 init: { releve: rel, verdict: ver } };
+      });
+    } else if (/Reproductible/.test(h)){
+      model.anomalies = { headerLi: tb.headerLi, lastLi: tb.rowLis[tb.rowLis.length - 1],
+        rows: tb.rowLis.map(function(li){
+          var p = partsOf(lines[li]);
+          var g = function(k){ return (p[k] || '').trim(); };
+          var repro = new RegExp(CHK_ON + '\\s*oui').test(g(6)) ? 'oui'
+                    : new RegExp(CHK_ON + '\\s*non').test(g(6)) ? 'non' : '';
+          var grav = new RegExp(CHK_ON + '\\s*bloquant').test(g(8)) ? 'bloquant'
+                   : new RegExp(CHK_ON + '\\s*majeur').test(g(8)) ? 'majeur'
+                   : new RegExp(CHK_ON + '\\s*mineur').test(g(8)) ? 'mineur' : '';
+          var e = { li: li, p: p, raw: lines[li], n: g(1), song: g(2), time: g(3),
+                    measure: g(4), desc: g(5), repro: repro, path: g(7), gravity: grav };
+          e.init = { song: e.song, time: e.time, measure: e.measure, desc: e.desc,
+                     repro: e.repro, path: e.path, gravity: e.gravity };
+          return e;
+        }) };
+    } else if (/Morceau/.test(h) && /Verdict/.test(h) && /\u00c9cout\u00e9 le/.test(h)){
+      model.synthesis = { rows: tb.rowLis.map(function(li){
+        var p = partsOf(lines[li]);
+        var e = { li: li, p: p, raw: lines[li], label: (p[2] || '').trim(),
+                  verdict: (p[3] || '').trim(), reserve: (p[4] || '').trim(), date: (p[5] || '').trim() };
+        e.init = { verdict: e.verdict, reserve: e.reserve, date: e.date };
+        return e;
+      }) };
+    }
+  }
+  return model;
+}
+
+/* ---------------------- serialization ---------------------- */
+function renderGrid(s){
+  var allInit = s.grid.vals.every(function(v, i){ return v === s.grid.init[i]; });
+  if (allInit) return s.grid.raw;
+  var out = '**Grille commune** : ';
+  for (var i = 0; i < 7; i++) out += (i ? ' \u00b7 ' : '') + 'T' + (i + 1) + ' ' + (s.grid.vals[i] || CHK);
+  return out;
+}
+function renderConsole(s){
+  var c = s.console;
+  if (!c.mix && !c.drift && !c.oracle) return c.raw;
+  return '**Console** : `[mix]` ' + (c.mix || U12) + ' \u00b7 d\u00e9rive max `[mix-stats]` ' +
+         (c.drift || U6) + ' ms \u00b7 `[oracle]` ' + (c.oracle || U12);
+}
+function renderVerdict(s){
+  var v = s.verdict;
+  if (v.val === v.init.val && v.anom === v.init.anom) return v.raw;
+  var opts = ['\u2705', '\ud83d\udfe1', '\u274c', '?'];
+  var str = opts.map(function(o){ return (v.val === o ? CHK_ON : CHK) + ' ' + o; }).join(' ');
+  return '**Verdict morceau** : ' + str + ' \u2014 **Anomalie(s)** n\u00b0 ' + (v.anom || U12);
+}
+function renderNotes(s){
+  var n = s.notes;
+  if (n.val === n.init) return n.raw;
+  return '**Notes** : ' + n.val;
+}
+function renderRow(r){
+  if (r.releve === r.init.releve && r.verdict === r.init.verdict) return r.raw;
+  var q = r.p.slice();
+  q[q.length - 3] = ' ' + (r.releve || '') + ' ';
+  q[q.length - 2] = ' ' + (r.verdict || '') + ' ';
+  return q.join('|');
+}
+function renderPrep(p){
+  if (p.isVersion){
+    var changed = p.checked !== p.init || p.commit !== p.initCommit || p.nav !== p.initNav;
+    var line = changed
+      ? '- [' + (p.checked ? 'x' : ' ') + '] Version test\u00e9e : commit `' + (p.commit || U12) +
+        '` \u00b7 Navigateur/OS : `' + (p.nav || U12) + '`'
+      : p.raw;
+    return { main: line, date: (p.date !== p.initDate) ? (p.dateIndent + '\u00b7 Date : `' + (p.date || U12) + '`') : null };
+  }
+  return { main: (p.checked === p.init) ? p.raw : '- [' + (p.checked ? 'x' : ' ') + '] ' + p.text, date: null };
+}
+function renderX1(){
+  var x = model.x1; if (!x) return null;
+  if (x.verdict === x.init.verdict && x.notes === x.init.notes) return x.raw;
+  var chk = function(v){ return (x.verdict === v ? CHK_ON : CHK) + ' ' + v; };
+  return x.indent + '\u2192 X1 : ' + chk('conforme') + ' ' + chk('r\u00e9serve') + ' ' + chk('d\u00e9faut') +
+         ' \u00b7 notes : ' + (x.notes || '______________________');
+}
+function renderX2(){
+  var x = model.x2; if (!x) return null;
+  if (x.na === x.init.na && x.result === x.init.result) return x.raw;
+  return x.indent + '\u2192 X2 : non requis ' + (x.na ? CHK_ON : CHK) + ' \u00b7 r\u00e9sultat : ' +
+         (x.result || '______________________');
+}
+function renderSynth(r){
+  if (r.verdict === r.init.verdict && r.reserve === r.init.reserve && r.date === r.init.date) return r.raw;
+  var q = r.p.slice();
+  q[3] = ' ' + (r.verdict || '') + ' ';
+  q[4] = ' ' + (r.reserve || '') + ' ';
+  q[5] = ' ' + (r.date || '') + ' ';
+  return q.join('|');
+}
+function reproCell(v){ return ' ' + (v === 'oui' ? CHK_ON : CHK) + ' oui ' + (v === 'non' ? CHK_ON : CHK) + ' non '; }
+function gravCell(v){
+  return ' ' + ['bloquant', 'majeur', 'mineur'].map(function(g){
+    return (v === g ? CHK_ON : CHK) + ' ' + g; }).join(' ') + ' ';
+}
+function renderAnomaly(r){
+  if (r.song === r.init.song && r.time === r.init.time && r.measure === r.init.measure &&
+      r.desc === r.init.desc && r.repro === r.init.repro && r.path === r.init.path &&
+      r.gravity === r.init.gravity) return r.raw;
+  var q = r.p.slice();
+  q[2] = ' ' + (r.song || '') + ' ';
+  q[3] = ' ' + (r.time || '') + ' ';
+  q[4] = ' ' + (r.measure || '') + ' ';
+  q[5] = ' ' + (r.desc || '') + ' ';
+  q[6] = reproCell(r.repro);
+  q[7] = ' ' + (r.path || '') + ' ';
+  q[8] = gravCell(r.gravity);
+  return q.join('|');
+}
+function renderCampaign(){
+  var c = model.campaign; if (!c) return null;
+  if (c.val === c.init) return c.raw;
+  var o = [['valid\u00e9e', '**valid\u00e9e**'], ['r\u00e9serves', 'valid\u00e9e **avec r\u00e9serves**'],
+           ['d\u00e9fauts', '**d\u00e9fauts \u00e0 corriger**']];
+  return '**D\u00e9cision de campagne** : ' + o.map(function(x){
+    return (c.val === x[0] ? CHK_ON : CHK) + ' ' + x[1]; }).join(' \u00b7 ');
+}
+function renderTester(){
+  var t = model.tester; if (!t) return null;
+  if (t.tester === t.init.tester && t.date === t.init.date) return t.raw;
+  return '**Testeur** : ' + (t.tester || '______________') + ' **Date** : ' + (t.date || '____ / ____ / ______');
+}
+
+function serializeLines(){
+  if (!model) return state.lines.slice();
+  var out = state.lines.slice();
+  var i, j;
+  for (i = 0; i < model.prep.length; i++){
+    var rp = renderPrep(model.prep[i]);
+    out[model.prep[i].li] = rp.main;
+    if (rp.date && model.prep[i].dateLi >= 0) out[model.prep[i].dateLi] = rp.date;
+  }
+  for (i = 0; i < model.songs.length; i++){
+    var s = model.songs[i];
+    if (s.grid) out[s.grid.li] = renderGrid(s);
+    if (s.console) out[s.console.li] = renderConsole(s);
+    if (s.verdict) out[s.verdict.li] = renderVerdict(s);
+    if (s.notes) out[s.notes.li] = renderNotes(s);
+    for (j = 0; j < s.rows.length; j++) out[s.rows[j].li] = renderRow(s.rows[j]);
+  }
+  var x1 = renderX1(); if (x1 !== null && model.x1) out[model.x1.li] = x1;
+  var x2 = renderX2(); if (x2 !== null && model.x2) out[model.x2.li] = x2;
+  if (model.synthesis) for (i = 0; i < model.synthesis.rows.length; i++)
+    out[model.synthesis.rows[i].li] = renderSynth(model.synthesis.rows[i]);
+  if (model.anomalies) for (i = 0; i < model.anomalies.rows.length; i++)
+    out[model.anomalies.rows[i].li] = renderAnomaly(model.anomalies.rows[i]);
+  var ca = renderCampaign(); if (ca !== null && model.campaign) out[model.campaign.li] = ca;
+  var te = renderTester(); if (te !== null && model.tester) out[model.tester.li] = te;
+  return out;
+}
+function serialize(){ return serializeLines().join(state.eol); }
+
+/* ---------------------- rendering (form) ---------------------- */
+var VERD_OPTS = ['', '\u2705', '\ud83d\udfe1', '\u274c', '?'];
+var VERD_LABEL = { '': '\u2014', '\u2705': '\u2705 ok', '\ud83d\udfe1': '\ud83d\udfe1 r\u00e9serve',
+                   '\u274c': '\u274c d\u00e9faut', '?': '? doute' };
+var GRID_OPTS = [CHK, '\u2705', '\u274c'];
+
+function verdictSelect(act, song, row, val, cls){
+  var opts = VERD_OPTS.slice();
+  if (val && opts.indexOf(val) < 0) opts.push(val);
+  var h = '<select class="verd' + (cls ? ' ' + cls : '') + '" data-act="' + act + '" data-song="' + song +
+          '" data-row="' + row + '">';
+  opts.forEach(function(o){
+    h += '<option value="' + esc(o) + '"' + (o === val ? ' selected' : '') + '>' +
+         esc(VERD_LABEL[o] || o) + '</option>';
+  });
+  return h + '</select>';
+}
+function gridSelect(song, i, val){
+  var opts = GRID_OPTS.slice(); if (val && opts.indexOf(val) < 0) opts.push(val);
+  var h = '<select data-act="grid" data-song="' + song + '" data-i="' + i + '">';
+  opts.forEach(function(o){
+    h += '<option value="' + esc(o) + '"' + (o === val ? ' selected' : '') + '>' + esc(o) + '</option>';
+  });
+  return h + '</select>';
+}
+
+function songHTML(s, idx){
+  var badge = s.verdict && s.verdict.val
+    ? '<span class="badge v">' + esc(s.verdict.val) + '</span>'
+    : '<span class="badge">\u2014</span>';
+
+  var h = '<details class="song" data-song="' + idx + '"' + (s.open ? ' open' : '') + '>' +
+          '<summary>5.' + s.num + ' \u00b7 ' + esc(s.title) + badge + '</summary><div class="songbody">';
+
+  h += '<div class="ctx">';
+  if (s.file) h += 'Fichier : <b>' + esc(s.file) + '</b><br>';
+  if (s.angle) h += 'Angle : ' + mdInline(s.angle) + '<br>';
+  if (s.machine) h += 'Machine : ' + mdInline(s.machine);
+  h += '</div>';
+
+  if (s.rows.length){
+    h += '<table class="ft"><thead><tr><th>#</th><th>Rep\u00e8re</th><th>O\u00f9</th><th>Attendu</th>' +
+         '<th>Relev\u00e9</th><th>Verdict</th></tr></thead><tbody>';
+    s.rows.forEach(function(r, ri){
+      var c = cellsOf(r.raw);
+      h += '<tr><td class="n">' + esc((c[0] || '').trim()) + '</td>' +
+           '<td class="rep">' + mdInline((c[1] || '').trim()) + '</td>' +
+           '<td>' + mdInline((c[2] || '').trim()) + '</td>' +
+           '<td class="attendu">' + mdInline((c[3] || '').trim()) + '</td>' +
+           '<td><input type="text" data-act="rowreleve" data-song="' + idx + '" data-row="' + ri +
+               '" value="' + esc(r.releve) + '" placeholder="relev\u00e9\u2026"></td>' +
+           '<td>' + verdictSelect('rowverdict', idx, ri, r.verdict, '') + '</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+
+  if (s.grid){
+    h += '<div class="grid"><span class="lbl">Grille commune :</span>';
+    for (var k = 0; k < 7; k++) h += '<label>T' + (k + 1) + gridSelect(idx, k, s.grid.vals[k]) + '</label>';
+    h += '</div>';
+  }
+  if (s.console){
+    h += '<div class="line"><span class="lbl">[mix]</span>' +
+         '<input type="text" data-act="console" data-song="' + idx + '" data-f="mix" value="' + esc(s.console.mix) + '">' +
+         '<span class="lbl">d\u00e9rive max ([mix-stats])</span>' +
+         '<input type="text" class="num" data-act="console" data-song="' + idx + '" data-f="drift" value="' + esc(s.console.drift) + '">' +
+         '<span class="lbl">ms</span>' +
+         '<span class="lbl">[oracle]</span>' +
+         '<input type="text" data-act="console" data-song="' + idx + '" data-f="oracle" value="' + esc(s.console.oracle) + '"></div>';
+  }
+  if (s.verdict){
+    h += '<div class="line"><span class="lbl">Verdict morceau</span><span class="vbtns">';
+    ['\u2705', '\ud83d\udfe1', '\u274c', '?'].forEach(function(v){
+      h += '<button class="vbtn' + (s.verdict.val === v ? ' on' : '') + '" data-act="verdict" data-song="' + idx +
+           '" data-val="' + v + '">' + v + '</button>';
+    });
+    h += '<button class="vbtn' + (!s.verdict.val ? ' on' : '') + '" data-act="verdict" data-song="' + idx + '" data-val="">\u2014</button>';
+    h += '</span><span class="lbl">Anomalie(s) n\u00b0</span>' +
+         '<input type="text" data-act="verdictanom" data-song="' + idx + '" value="' + esc(s.verdict.anom) + '"></div>';
+  }
+  if (s.notes){
+    h += '<div class="line"><span class="lbl">Notes</span></div>' +
+         '<textarea data-act="notes" data-song="' + idx + '" rows="2" placeholder="notes libres\u2026">' + esc(s.notes.val) + '</textarea>';
+  }
+  return h + '</div></details>';
+}
+
+function render(){
+  if (!model){ document.getElementById('app').innerHTML =
+    '<p class="hint">Aucun fichier charg\u00e9. Cliquez sur <b>Ouvrir TESTLOG.md</b> (ou d\u00e9posez le fichier ici).</p>'; return; }
+  var h = '';
+
+  /* §3 préparation */
+  if (model.prep.length){
+    h += '<section class="card"><h2>\u00a73 \u00b7 Environnement de test (pr\u00e9paration)</h2>';
+    model.prep.forEach(function(p, i){
+      h += '<div class="chk"><input type="checkbox" data-act="prep" data-i="' + i + '"' + (p.checked ? ' checked' : '') + '>' +
+           '<span>' + mdInline(p.text) + '</span></div>';
+      if (p.isVersion){
+        h += '<div class="line"><span class="lbl">commit</span>' +
+             '<input type="text" data-act="commit" value="' + esc(p.commit) + '">' +
+             '<span class="lbl">Navigateur/OS</span>' +
+             '<input type="text" data-act="nav" value="' + esc(p.nav) + '">' +
+             '<span class="lbl">Date</span>' +
+             '<input type="text" data-act="vdate" value="' + esc(p.date) + '"></div>';
+      }
+    });
+    h += '</section>';
+  }
+
+  /* §4 transverses */
+  if (model.x1 || model.x2){
+    h += '<section class="card"><h2>\u00a74 \u00b7 Contr\u00f4les transverses</h2>';
+    if (model.x1){
+      h += '<div class="line"><span class="lbl">X1 \u2014 vitesse \u00d70,5 / \u00d71,5</span><span class="vbtns">';
+      [['conforme', 'conforme'], ['r\u00e9serve', 'r\u00e9serve'], ['d\u00e9faut', 'd\u00e9faut'], ['', '\u2014']].forEach(function(v){
+        h += '<button class="vbtn' + (model.x1.verdict === v[0] ? ' on' : '') + '" data-act="x1" data-val="' + esc(v[0]) + '">' + v[1] + '</button>';
+      });
+      h += '</span><span class="lbl">notes</span><input type="text" data-act="x1notes" value="' + esc(model.x1.notes) + '"></div>';
+    }
+    if (model.x2){
+      h += '<div class="line"><label class="lbl"><input type="checkbox" data-act="x2na"' + (model.x2.na ? ' checked' : '') + '> X2 non requis</label>' +
+           '<span class="lbl">r\u00e9sultat</span><input type="text" data-act="x2result" value="' + esc(model.x2.result) + '"></div>';
+    }
+    h += '</section>';
+  }
+
+  /* §5 fiches */
+  h += '<section class="card"><h2>\u00a75 \u00b7 Fiches par morceau</h2>' +
+       '<p class="hint">Remplissez <b>Relev\u00e9</b> et <b>Verdict</b> par point, la grille T1-T7, la console, le verdict d\u2019ensemble et les notes.</p>';
+  model.songs.forEach(function(s, i){ h += songHTML(s, i); });
+  h += '<button class="add" data-act="addsong">+ Ajouter un morceau</button></section>';
+
+  /* §7 synthèse */
+  if (model.synthesis){
+    h += '<section class="card"><h2>\u00a77 \u00b7 Synth\u00e8se de campagne</h2>' +
+         '<table class="ft"><thead><tr><th>#</th><th>Morceau</th><th>Verdict</th><th>R\u00e9serve / anomalie</th><th>\u00c9cout\u00e9 le</th></tr></thead><tbody>';
+    model.synthesis.rows.forEach(function(r, i){
+      h += '<tr><td class="n">' + esc((r.p[1] || '').trim()) + '</td><td>' + mdInline(r.label) + '</td>' +
+           '<td>' + verdictSelect('synthverdict', 0, i, r.verdict, '') + '</td>' +
+           '<td><input type="text" data-act="synthreserve" data-row="' + i + '" value="' + esc(r.reserve) + '"></td>' +
+           '<td><input type="text" data-act="synthdate" data-row="' + i + '" value="' + esc(r.date) + '"></td></tr>';
+    });
+    h += '</tbody></table>';
+    if (model.campaign){
+      h += '<div class="line"><span class="lbl">D\u00e9cision de campagne</span><span class="vbtns">';
+      [['valid\u00e9e', 'valid\u00e9e'], ['r\u00e9serves', 'avec r\u00e9serves'], ['d\u00e9fauts', 'd\u00e9fauts \u00e0 corriger'], ['', '\u2014']].forEach(function(v){
+        h += '<button class="vbtn' + (model.campaign.val === v[0] ? ' on' : '') + '" data-act="campaign" data-val="' + esc(v[0]) + '">' + v[1] + '</button>';
+      });
+      h += '</span></div>';
+    }
+    if (model.tester){
+      h += '<div class="line"><span class="lbl">Testeur</span><input type="text" data-act="tester" value="' + esc(model.tester.tester) + '">' +
+           '<span class="lbl">Date</span><input type="text" data-act="testerdate" value="' + esc(model.tester.date) + '"></div>';
+    }
+    h += '</section>';
+  }
+
+  /* §8 anomalies */
+  if (model.anomalies){
+    h += '<section class="card"><h2>\u00a78 \u00b7 Journal des anomalies</h2>' +
+         '<table class="ft"><thead><tr><th>N\u00b0</th><th>Morceau</th><th>Horodatage</th><th>Mesure</th>' +
+         '<th>Description</th><th>Reproductible</th><th>Chemin</th><th>Gravit\u00e9</th></tr></thead><tbody>';
+    var dl = '<datalist id="songs">' + model.songs.map(function(s){ return '<option value="' + esc(s.title) + '">'; }).join('') + '</datalist>';
+    model.anomalies.rows.forEach(function(r, i){
+      h += '<tr><td class="n">' + esc(r.n) + '</td>' +
+           '<td><input type="text" list="songs" data-act="anomsong" data-row="' + i + '" value="' + esc(r.song) + '"></td>' +
+           '<td><input type="text" data-act="anomtime" data-row="' + i + '" value="' + esc(r.time) + '"></td>' +
+           '<td><input type="text" data-act="anommeasure" data-row="' + i + '" value="' + esc(r.measure) + '"></td>' +
+           '<td><input type="text" data-act="anomdesc" data-row="' + i + '" value="' + esc(r.desc) + '"></td>' +
+           '<td><select data-act="anomrepro" data-row="' + i + '">' +
+             ['', 'oui', 'non'].map(function(o){ return '<option value="' + o + '"' + (o === r.repro ? ' selected' : '') + '>' + (o || '\u2014') + '</option>'; }).join('') +
+           '</select></td>' +
+           '<td><input type="text" data-act="anompath" data-row="' + i + '" value="' + esc(r.path) + '"></td>' +
+           '<td><select data-act="anomgrav" data-row="' + i + '">' +
+             ['', 'bloquant', 'majeur', 'mineur'].map(function(o){ return '<option value="' + o + '"' + (o === r.gravity ? ' selected' : '') + '>' + (o || '\u2014') + '</option>'; }).join('') +
+           '</select></td></tr>';
+    });
+    h += '</tbody></table>' + dl + '<button class="add" data-act="addanom">+ Ajouter une anomalie</button></section>';
+  }
+
+  document.getElementById('app').innerHTML = h;
+  refresh();
+}
+
+function refresh(){
+  if (!model) return;
+  var done = model.songs.filter(function(s){ return s.verdict && s.verdict.val; }).length;
+  var total = model.songs.length || 15;
+  document.getElementById('barfill').style.width = Math.round(100 * done / total) + '%';
+  document.getElementById('progtext').textContent = done + '/' + total + ' fiches conclues';
+  document.getElementById('preview').textContent = serialize();
+}
+
+/* ---------------------- events ---------------------- */
+var app = document.getElementById('app');
+
+app.addEventListener('input', function(e){
+  var t = e.target, act = t.dataset && t.dataset.act; if (!act || !model) return;
+  var s = +t.dataset.song, r = +t.dataset.row, i = +t.dataset.i;
+  switch (act){
+    case 'rowreleve':    model.songs[s].rows[r].releve = t.value; break;
+    case 'rowverdict':   model.songs[s].rows[r].verdict = t.value; break;
+    case 'grid':         model.songs[s].grid.vals[i] = t.value; break;
+    case 'console':      model.songs[s].console[t.dataset.f] = t.value; break;
+    case 'verdictanom':  model.songs[s].verdict.anom = t.value; break;
+    case 'notes':        model.songs[s].notes.val = t.value; break;
+    case 'prep':         model.prep[i].checked = t.checked; break;
+    case 'commit':       model.prep.filter(function(p){ return p.isVersion; })[0].commit = t.value; break;
+    case 'nav':          model.prep.filter(function(p){ return p.isVersion; })[0].nav = t.value; break;
+    case 'vdate':        model.prep.filter(function(p){ return p.isVersion; })[0].date = t.value; break;
+    case 'x1notes':      model.x1.notes = t.value; break;
+    case 'x2na':         model.x2.na = t.checked; break;
+    case 'x2result':     model.x2.result = t.value; break;
+    case 'synthreserve': model.synthesis.rows[r].reserve = t.value; break;
+    case 'synthdate':    model.synthesis.rows[r].date = t.value; break;
+    case 'synthverdict': model.synthesis.rows[r].verdict = t.value; break;
+    case 'anomsong':     model.anomalies.rows[r].song = t.value; break;
+    case 'anomtime':     model.anomalies.rows[r].time = t.value; break;
+    case 'anommeasure':  model.anomalies.rows[r].measure = t.value; break;
+    case 'anomdesc':     model.anomalies.rows[r].desc = t.value; break;
+    case 'anomrepro':    model.anomalies.rows[r].repro = t.value; break;
+    case 'anompath':     model.anomalies.rows[r].path = t.value; break;
+    case 'anomgrav':     model.anomalies.rows[r].gravity = t.value; break;
+    case 'campaign':     model.campaign.val = t.value; break;
+    case 'tester':       model.tester.tester = t.value; break;
+    case 'testerdate':   model.tester.date = t.value; break;
+    default: return;
+  }
+  refresh();
+});
+
+app.addEventListener('click', function(e){
+  var t = e.target.closest('[data-act]'); if (!t || !model) return;
+  var act = t.dataset.act, s = +t.dataset.song;
+  if (act === 'verdict'){ model.songs[s].verdict.val = t.dataset.val; render(); }
+  else if (act === 'x1'){ model.x1.verdict = t.dataset.val; render(); }
+  else if (act === 'campaign'){ model.campaign.val = t.dataset.val; render(); }
+  else if (act === 'addanom'){ addAnomaly(); }
+  else if (act === 'addsong'){ addSong(); }
+});
+
+app.addEventListener('toggle', function(e){
+  var d = e.target.closest('details.song'); if (!d || !model) return;
+  model.songs[+d.dataset.song].open = d.open;
+}, true);
+
+/* ---------------------- structural edits ---------------------- */
+function applyToLines(){ state.lines = serializeLines(); }
+function nextAnomalyN(){
+  var mx = 0; model.anomalies.rows.forEach(function(r){ var v = parseInt(r.n, 10); if (v > mx) mx = v; });
+  return mx + 1;
+}
+function addAnomaly(){
+  applyToLines();
+  var line = '| ' + nextAnomalyN() + ' | | | | | ' + CHK + ' oui ' + CHK + ' non | | ' +
+             CHK + ' bloquant ' + CHK + ' majeur ' + CHK + ' mineur |';
+  state.lines.splice(model.anomalies.lastLi + 1, 0, line);
+  parse(state.lines.join(state.eol));
+  var last = model.anomalies.rows[model.anomalies.rows.length - 1];
+  if (last) last.raw = line; // force re-render editable
+  render();
+  var inputs = document.querySelectorAll('[data-act="anomsong"]');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+function addSong(){
+  var title = prompt('Titre de la fiche (ex. "AC/DC \u2014 Thunderstruck") :');
+  if (!title) return;
+  var file = prompt('Nom du fichier .gp :', '') || '';
+  applyToLines();
+  var n = model.songs.length + 1;
+  var block = [
+    '### 5.' + n + ' \u00b7 ' + title,
+    '`' + file + '`',
+    '**Angle** : ',
+    '**Machine** : ',
+    '',
+    '| # | Rep\u00e8re | O\u00f9 (mesure) | Attendu | Relev\u00e9 | Verdict |',
+    '|---|---|---|---|---|---|',
+    '| 1 | | | | | |',
+    '',
+    '**Grille commune** : T1 ' + CHK + ' \u00b7 T2 ' + CHK + ' \u00b7 T3 ' + CHK + ' \u00b7 T4 ' + CHK +
+      ' \u00b7 T5 ' + CHK + ' \u00b7 T6 ' + CHK + ' \u00b7 T7 ' + CHK,
+    '**Console** : `[mix]` ' + U12 + ' \u00b7 d\u00e9rive max `[mix-stats]` ' + U6 + ' ms \u00b7 `[oracle]` ' + U12,
+    '**Verdict morceau** : ' + CHK + ' \u2705 ' + CHK + ' \ud83d\udfe1 ' + CHK + ' \u274c ' + CHK + ' ? \u2014 **Anomalie(s)** n\u00b0 ' + U12,
+    '**Notes** : ' + U12,
+    '',
+    '---',
+    ''
+  ];
+  var at = -1;
+  for (var i = 0; i < state.lines.length; i++) if (/^##\s+6\./.test(state.lines[i])) { at = i; break; }
+  if (at < 0) at = state.lines.length;
+  state.lines.splice(at, 0, block.join('\n'));
+  parse(state.lines.join(state.eol));
+  var lastSong = model.songs[model.songs.length - 1];
+  if (lastSong) lastSong.open = true;
+  render();
+}
+
+/* ---------------------- load / export ---------------------- */
+function setStatus(msg, cls){
+  var el = document.getElementById('status');
+  el.textContent = msg || ''; el.className = 'status' + (cls ? ' ' + cls : '');
+}
+function setMode(){
+  document.getElementById('mode').textContent = state.handle
+    ? 'mode : écriture en place (' + state.fileName + ')'
+    : 'mode : lecture seule \u2014 l\u2019export ouvrira une bo\u00eete \u00ab Enregistrer \u00bb';
+}
+function load(text, name, handle){
+  state.fileName = name || 'TESTLOG.md';
+  state.handle = handle || null;
+  parse(text);
+  setMode();
+  setStatus('Fichier charg\u00e9 (' + model.songs.length + ' fiches).', 'ok');
+  render();
+}
+
+document.getElementById('btnOpen').addEventListener('click', async function(){
+  if (window.showOpenFilePicker){
+    try {
+      var hs = await window.showOpenFilePicker({ multiple: false,
+        types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md'] } }] });
+      var f = await hs[0].getFile();
+      load(await f.text(), f.name, hs[0]);
+      return;
+    } catch (err){ if (err && err.name === 'AbortError') return; }
+  }
+  document.getElementById('fileInput').click();
+});
+document.getElementById('fileInput').addEventListener('change', function(e){
+  var f = e.target.files[0]; if (!f) return;
+  var rd = new FileReader();
+  rd.onload = function(){ load(rd.result, f.name, null); };
+  rd.readAsText(f);
+});
+
+document.getElementById('btnReset').addEventListener('click', function(){
+  if (!state.original) return;
+  if (!confirm('Recharger le fichier d\u2019origine et perdre les saisies non export\u00e9es ?')) return;
+  parse(state.original); render();
+  setStatus('Fichier recharg\u00e9.', 'ok');
+});
+
+async function writeOut(text){
+  if (state.handle){
+    var w = await state.handle.createWritable();
+    await w.write(text); await w.close();
+    return 'inplace';
+  }
+  if (window.showSaveFilePicker){
+    var h = await window.showSaveFilePicker({ suggestedName: state.fileName || 'TESTLOG.md',
+      types: [{ description: 'Markdown', accept: { 'text/markdown': ['.md'] } }] });
+    var w2 = await h.createWritable();
+    await w2.write(text); await w2.close();
+    state.handle = h; setMode();
+    return 'inplace';
+  }
+  var blob = new Blob([text], { type: 'text/markdown' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = state.fileName || 'TESTLOG.md';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+  return 'download';
+}
+
+async function doExport(){
+  if (!model){ setStatus('Aucun fichier charg\u00e9.', 'bad'); return; }
+  var txt = serialize();
+  var done = model.songs.filter(function(s){ return s.verdict && s.verdict.val; }).length;
+  var msg = 'Exporter les r\u00e9sultats vers ' + state.fileName + ' ?\n\n' +
+            '\u2022 ' + done + '/' + model.songs.length + ' fiches conclues\n' +
+            '\u2022 les zones non \u00e9dit\u00e9es sont recopi\u00e9es \u00e0 l\u2019identique\n' +
+            '\u2022 le fichier cible sera \u00c9CRAS\u00c9' +
+            (state.handle ? '' : '\n\u2022 une bo\u00eete \u00ab Enregistrer \u00bb va s\u2019ouvrir : choisissez TESTLOG.md');
+  if (!confirm(msg)) return;
+  try {
+    var how = await writeOut(txt);
+    setStatus(how === 'inplace' ? '\u2705 \u00c9crit dans ' + state.fileName
+                                : '\u2705 T\u00e9l\u00e9charg\u00e9 (' + state.fileName + ')', 'ok');
+  } catch (err){
+    if (err && err.name === 'AbortError'){ setStatus('Export annul\u00e9.', ''); return; }
+    setStatus('Erreur export : ' + (err && err.message ? err.message : err), 'bad');
+  }
+}
+document.getElementById('btnExport').addEventListener('click', doExport);
+document.addEventListener('keydown', function(e){
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's'){ e.preventDefault(); doExport(); }
+});
+
+/* drag & drop */
+document.addEventListener('dragover', function(e){ e.preventDefault(); });
+document.addEventListener('drop', function(e){
+  e.preventDefault();
+  var f = e.dataTransfer.files && e.dataTransfer.files[0]; if (!f) return;
+  var rd = new FileReader();
+  rd.onload = function(){ load(rd.result, f.name, null); };
+  rd.readAsText(f);
+});
+
+/* auto-chargement (fonctionne si la page est servie par http, ex. :8777) */
+(function autoLoad(){
+  if (!/^https?:$/.test(location.protocol)){ render(); return; }
+  fetch('TESTLOG.md', { cache: 'no-store' }).then(function(r){
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text();
+  }).then(function(t){ load(t, 'TESTLOG.md', null); })
+    .catch(function(){ render(); });
+})();
+
+/* hook de test (round-trip) */
+window.__testlog = {
+  load: function(t, n){ load(t, n || 'TESTLOG.md', null); },
+  serialize: function(){ return serialize(); },
+  parse: parse,
+  model: function(){ return model; },
+  state: state
+};
+</script>
+</body>
+</html>
