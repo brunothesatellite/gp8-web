@@ -14,7 +14,7 @@
      · on clique VRAIMENT Lecture ;
      · les métriques viennent de l'INSTRUMENTATION LIVRÉE `[mix-stats]`
        (js/mix-sync.js) — mêmes expressions, mêmes seuils que
-       tools/mix-sync-harness.js (§6.3 BUGFIX-TOTAL) ;
+       tools/mix-sync-harness.js (§6.2 BUGFIX-TOTAL) ;
      · la seule sonde ajoutée est un COMPTEUR PASSE-PLAQUES sur
        `api.playbackSpeed` (le vrai setter d'alphaTab est conservé) : c'est
        la cible P2 « 0 écriture en lecture », absente du journal livré.
@@ -265,10 +265,10 @@ async function runCase(ctx, base, file, pick) {
          ❌ ÉCHEC      = invariant du livrable (P2 : 0 écriture de vitesse ;
                          moteur + piste audio câblés ; horloge qui avance ;
                          pas d'emballement de dérive au-delà de la zone morte).
-         🟡 conforme   = vert, mais la cible « croisière » stricte du §6.3
+         🟡 conforme   = vert, mais la cible « croisière » stricte du §6.2
                          (dérive < 40 ms, taux ≤ 2 %, 0 arrêt) n'est pas
                          atteinte sur cet exemple — bruit de la pile audio
-                         temps réel (l'oreille, §7, arbitre le ressenti).
+                         temps réel (l'oreille, §5.2, arbitre le ressenti).
        Les statistiques écartent la 1ʳᵉ fenêtre [mix-stats] (amorçage). */
     if (!(r.bars > 0 && r.tracks > 0))            r.notes.push('score vide');
     if (!(r.syncPoints > 0))                      r.notes.push('0 point de synchro (pont non construit)');
@@ -283,7 +283,7 @@ async function runCase(ctx, base, file, pick) {
     if (r.ratePct > 15)                           r.notes.push('écritures de taux ' + r.ratePct.toFixed(2) + ' % > 15 %');
     if (r.consoleErrors.length)                   r.notes.push(r.consoleErrors.length + ' erreur(s) console');
     r.ok = r.notes.length === 0;
-    /* cible stricte §6.3 (informative) : dérive < 40 ms · taux ≤ 2 % · 0 arrêt */
+    /* cible stricte §6.2 (informative) : dérive < 40 ms · taux ≤ 2 % · 0 arrêt */
     r.strict = r.ok && st.stalls === 0 && st.driftMed < 40 && r.ratePct <= 2;
   } catch (e) {
     r.notes.push('exception : ' + (e && e.message ? e.message : String(e)));
@@ -433,7 +433,7 @@ async function runCase(ctx, base, file, pick) {
   console.log(bad === 0
     ? 'RESULTAT : OK — ' + rows.length + '/' + rows.length + ' exemple(s) verts : invariants tenus en navigateur' +
       ' (0 écriture de playbackSpeed en lecture, moteur + piste audio câblés, pas d\'emballement de dérive).' +
-      (soft ? '  ' + soft + ' en 🟡 (cible stricte §6.3 non atteinte : bruit de la pile audio temps réel).' : '')
+      (soft ? '  ' + soft + ' en 🟡 (cible stricte §6.2 non atteinte : bruit de la pile audio temps réel).' : '')
     : 'RESULTAT : ' + bad + ' exemple(s) en échec sur ' + rows.length);
   process.exit(bad === 0 ? 0 : 1);
 })().catch(e => { console.error(e); process.exit(1); });

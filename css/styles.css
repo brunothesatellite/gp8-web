@@ -201,7 +201,7 @@
   }
 
   /* Liste des pistes — le scroll est piloté par la hauteur d'écran, pas la
-     largeur (cf. RESPONSIVE.md P1 : un téléphone en paysage fait 915×412).
+     largeur (cf. BUGFIX-TOTAL.md §7 : un téléphone en paysage fait 915×412).
      · Grand écran haut : seule la liste défile, en-tête/libellés/pied fixes.
      · Téléphone (portrait ou paysage court ≤559px) : AUCUNE scrollbar interne ;
        le tiroir entier devient le seul conteneur swipable (toutes les pistes

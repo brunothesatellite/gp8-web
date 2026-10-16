@@ -79,7 +79,7 @@
     const STALL_RATIO = 0.5; // maître en avance < 50 % du réel = à l'arrêt
     const STAT_MS    = 5000; // périodicité du rapport d'instrumentation
 
-    /* --- discontinuités + pente locale (correctif BUGMP3) -------------
+    /* --- discontinuités + pente locale (correctif audio, BUGFIX-TOTAL §2/§3) ---
        Un segment [p → q] est un SAUT (discontinuité à re-ancrer) quand l'axe
        audio fait un mouvement impossible pour un tempo : il RECULE (Δa < 0)
        ou bondit hors de toute plage musicale (pente hors [1/JUMP_SLOPE,

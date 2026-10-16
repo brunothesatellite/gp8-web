@@ -4,7 +4,7 @@
    ------------------------------------------------------------------
    MIROIR de la boucle de js/mix-sync.js (constantes identiques), sans
    navigateur, pour arbitrer la LOI DE COMMANDE du correcteur (RC-3,
-   BUGMP3 §14). Trois lois comparées sur le MÊME pont :
+   BUGFIX-TOTAL.md §2.1). Trois lois comparées sur le MÊME pont :
 
    ⚠ MODÈLE PRÉ-P2. Depuis BUGFIX-TOTAL P2, le tempo GP n'est plus appliqué
      par `playbackSpeed` en lecture : il est PRÉ-CUIT dans le MidiFile
@@ -43,8 +43,8 @@
    ⚠ Les constantes et formules ci-dessous sont le MIROIR de
      js/mix-sync.js. En cas de modification de l'une, modifier l'autre.
    ⚠ Ne modélise PAS le pipeline de rendu (coût réel d'une écriture de
-     playbackSpeed chez alphaTab = note coupée + buffer vidé, BUGMP3 §14
-     RC-2) : les « coupures » sont comptées, pas entendues.
+     playbackSpeed chez alphaTab = note coupée + buffer vidé, BUGFIX-TOTAL.md
+     §2.1 RC-2) : les « coupures » sont comptées, pas entendues.
 
    Usage :  node tools/tempo-correct-sim.js            (tous les samples)
             node tools/tempo-correct-sim.js Stein      (filtre sur le nom)

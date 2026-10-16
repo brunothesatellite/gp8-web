@@ -1,5 +1,5 @@
 /* ===== Correctif RC-1 : traversées de répétition pilotées par Guitar Pro =====
-   BUGMP3 §14
+   cf. BUGFIX-TOTAL.md §2.1 (RC-1) et §3
 
    PROBLÈME. Quand le déroulé alphaTab (`repeatCount`) joue MOINS de
    traversées que Guitar Pro n'en a enregistrées dans ses points de synchro,
@@ -295,7 +295,7 @@
          Sur les données actuelles (Renaud, 4 mesures H1), la garde REFUSE :
          couvrir 4 clés introduirait 6 sauts (7 → 13), car les mesures
          voisines restent ancrées sur une autre passe — le résidu est donc
-         bien une donnée GP (H2), pas un appariement (cf. BUGFIX-TOTAL §11.7). */
+         bien une donnée GP (H2), pas un appariement (cf. BUGFIX-TOTAL §5.1). */
       const live = () => metricsOf(score, MFG, gpKeysOf(score));
       const shifts = h1ShiftsOf(score, gpKeysOf(score));
       const dg0 = cur.danger, jp0 = cur.jumps, bk0 = cur.back;
@@ -326,7 +326,7 @@
         trace('oracle', `P3 renumérotation GP (H1) : ${h1Applied} mesure(s) ` +
           `réassignée(s) (${h1Keys} clé(s) couverte(s)), ${h1Rejected} rejetée(s) ` +
           `par la garde (clés manquantes ${nc0} → ${cur.nc})` +
-          (h1Rejected ? ' — résidu H2 (donnée GP), voir BUGFIX-TOTAL §11.7' : ''));
+          (h1Rejected ? ' — résidu H2 (donnée GP), voir BUGFIX-TOTAL §5.1' : ''));
       }
       return raised;
     } catch (e) {

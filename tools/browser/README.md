@@ -58,17 +58,17 @@ $env:GP8_BROWSER = "D:\chemin\vers\chrome.exe"; npm test
 Aucun miroir : les expressions de relecture de `[mix-stats]` sont celles de
 `tools/mix-sync-harness.js`.
 
-## Verdicts (voir `BUGFIX-TOTAL.md` §6.5)
+## Verdicts (voir `BUGFIX-TOTAL.md` §6.2)
 
 - **❌ échec** : invariant du livrable — **0** écriture de `playbackSpeed` en
   lecture, **0** erreur console, moteur + piste audio câblés, horloge qui
   avance, piste audio qui avance, dérive de croisière < 150 ms (1,5× la zone
   morte), ≤ 1 arrêt maître, écritures de taux ≤ 15 %.
-- **🟡 vert** : invariants tenus, mais la cible **stricte** du §6.3
+- **🟡 vert** : invariants tenus, mais la cible **stricte** du §6.2
   (dérive < 40 ms, taux ≤ 2 %, 0 arrêt) n'est pas atteinte sur cet exemple —
-  bruit de la pile audio **temps réel** ; l'oreille (§7) arbitre le ressenti.
+  bruit de la pile audio **temps réel** ; l'oreille (§5.2) arbitre le ressenti.
 
-Deux écarts de mesure assumés (documentés en §6.5) : la 1ʳᵉ fenêtre de 5 s
+Deux écarts de mesure assumés (documentés en §6.2) : la 1ʳᵉ fenêtre de 5 s
 (amorçage de la piste audio) est **écartée**, et la dérive de croisière en
 navigateur est **bornée par la zone morte du contrôleur (~100 ms)**, pas par les
 40 ms du banc déterministe.
@@ -79,7 +79,7 @@ navigateur est **bornée par la zone morte du contrôleur (~100 ms)**, pas par l
 console, dérive de croisière 10-80 ms. 10 exemples en 🟡 (cible stricte non
 atteinte), 5 en ✅ (F-Zero X, Igorrr ×2, Led Zeppelin, Offspring). La trace P3
 `[oracle] … résidu H2` réapparaît à l'identique (Renaud). Détail complet en
-`BUGFIX-TOTAL.md` §11.10.
+`BUGFIX-TOTAL.md` §2.5.
 
 > Le manifeste est **complet** depuis P6 : `samples/list.json` a **15** entrées,
 > une par `.gp` de `samples/` (`The Four Horsemen` inclus). Si un `.gp` est

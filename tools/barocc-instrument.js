@@ -20,7 +20,7 @@
    4 mesures H1 sur Renaud (8, 9, 11, 42) que la garde REFUSE — les couvrir
    ajouterait 6 sauts (7 → 13), car les mesures voisines restent ancrées sur
    une autre passe : le décalage y serait une devinette, pas une preuve.
-   Conclusion : résidu = donnée GP (BUGFIX-TOTAL §11.7), conforme à la clause
+   Conclusion : résidu = donnée GP (BUGFIX-TOTAL §5.1), conforme à la clause
    de sortie de la DoD #5.
 
    MÉTHODE (aucun miroir : tout vient du code livré)
@@ -254,5 +254,5 @@ console.log('   TENTE (js/repeat-oracle.js) et ne le CONSERVE que si les clés m
 console.log('   sans ajouter de pente hors clamp, de saut re-ancré ni de segment d\'audio reculant.');
 console.log(' · H2 = GP décrit des traversées que le déroulé ne joue pas (ou une mesure jamais');
 console.log('   jouée) : AUCUN décalage ne les couvre — donnée du .gp, documentée (BUGFIX-TOTAL');
-console.log('   §11.7) et non corrigée côté webapp (cf. précédent BUGMP3 §12.2).');
+console.log('   §5.1) et non corrigée côté webapp (cf. BUGFIX-TOTAL.md §3).');
 process.exit(bad === 0 ? 0 : 1);

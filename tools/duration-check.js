@@ -23,7 +23,7 @@
         la fin du MP3 (sinon le synthé joue seul après la fin de l'audio).
         `couverture` = portée des points de synchro / durée MP3 : < 100 % = les
         sync-points du .gp s'arrêtent avant la fin du MP3 (donnée du fichier,
-        cf. §11.2.3) — la fin du morceau vient alors de l'AUDIO, et la webapp
+        cf. BUGFIX-TOTAL.md §5.1) — la fin du morceau vient alors de l'AUDIO, et la webapp
         est légitimement plus courte. L'axe pré-cuit total est journalisé mais
         NON comparé au MP3 : sauts et segments clampés le rendent non additif.
 
@@ -296,7 +296,7 @@ for (const file of files) {
        exactement ce que `targetSeconds()` vise en lecture. Elle NE DOIT PAS
        dépasser la fin du MP3 (sinon le synthé jouerait seul après la fin de
        l'audio). Être plus court est une donnée du fichier : les sync-points
-       du .gp s'arrêtent avant la fin du MP3 (couverture, §11.2.3). */
+       du .gp s'arrêtent avant la fin du MP3 (couverture, BUGFIX-TOTAL.md §5.1). */
     const webappMs = MixSync.audioMsFor(preCooked.ms);
     const limit = mp3ms ? mp3ms * (1 + TOL) : Infinity;
     const overrun = mp3ms ? webappMs > limit : false;

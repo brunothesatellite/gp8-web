@@ -349,7 +349,7 @@ console.log('tempoWrites (total) : ' + totalTempo +
 console.log('rateWrites  (total) : ' + totalRate + '   seekWrites (total) : ' + totalSeek);
 console.log('dérive croisière (pire) : ' + worstMed + ' ms   (médiane des pics de fenêtre)');
 console.log('dérive pic (pire)       : ' + worstDrift + ' ms   (max, sauts volontaires inclus)');
-/* Seuils BUGFIX-TOTAL §6.3 : dérive croisière < 40 ms ; écritures de taux
+/* Seuils BUGFIX-TOTAL §6.2 : dérive croisière < 40 ms ; écritures de taux
    ≤ 2 % du temps de lecture (le mp3 reste quasi natif). */
 if (worstMed >= 40) bad++;
 console.log('seuil dérive croisière < 40 ms : ' + (worstMed < 40 ? '✓' : '⚠ ÉCHEC'));

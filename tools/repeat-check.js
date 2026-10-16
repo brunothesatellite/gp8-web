@@ -1,5 +1,5 @@
 /* ==================================================================
-   Contrôles de non-régression du CORRECTIF RC-1 (BUGMP3 §14)
+   Contrôles de non-régression du CORRECTIF RC-1 (BUGFIX-TOTAL.md §2.1)
    ------------------------------------------------------------------
    Exécute le VRAI code du dépôt :
      · js/repeat-oracle.js  (module livré, requis tel quel) ;

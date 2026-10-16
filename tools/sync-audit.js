@@ -20,7 +20,7 @@
    ⚠ Les constantes et formules ci-dessous sont le MIROIR de
      js/mix-sync.js. En cas de modification de l'une, modifier l'autre.
 
-   MISE EN PHASE (BUGLATEST.md tâche T4 — fait) : le score est reconstruit
+   MISE EN PHASE (BUGFIX-TOTAL.md §2.3 — fait) : le score est reconstruit
    par le MÊME chemin que l'application :
        fixEmptyAnacrusis  →  RepeatOracle.raise  →  generateSyncPoints
    `fixAlternateEndings` (SUPPRIMÉ du code livré en c7609e6) n'est plus

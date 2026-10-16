@@ -217,7 +217,7 @@
         S.midiTempo0 = null;            // relevé à la génération du MIDI pré-cuit
         fixEmptyAnacrusis(score);       // mesures vides/pickup remises sur la timeline
         /* NB : deux interventions sur les répétitions, et TOUTES deux dictées
-           par le .gp lui-même (voir BUGRENVOI.md / BUGMP3 §14) :
+           par le .gp lui-même (voir BUGFIX-TOTAL.md §2.1) :
              · les fins multiples sont normalisées, mais seulement le temps
                d'une passe de génération (installRepeatNormalization) ;
              · `repeatCount` peut être relevé une fois pour toutes, quand
@@ -555,7 +555,7 @@
       return clamp(isFinite(v) ? v : 1, 0, 1.5);
     }
 
-    /* ---- Correctif BUGMP3 : mesures vides / pickup escamotées ----
+    /* ---- Correctif mesures vides / pickup escamotées (ex-BUGMP3) ----
        Un « anacrusis » (mesure avant la n°1) est réduit à 0 tick par alphaTab
        (isAnacrusis → calculateDuration 0, et la mesure suivante repart au même
        tick). La mesure — et son audio — est alors escamotée, et la durée totale
@@ -580,8 +580,8 @@
       return true;
     }
 
-    /* ---- Correctif BUGRENVOI : fins alternées réparties sur PLUSIEURS fins
-           de répétition --------------------------------------------------
+    /* ---- Correctif fins alternées (ex-BUGRENVOI) : réparties sur PLUSIEURS
+           fins de répétition ---------------------------------------------
        alphaTab fabrique `Repeat.iterations` comme un compteur PAR FIN
        (`closingIndex`), alors que `alternateEndings` est un masque ABSOLU
        (bit k = fin k+1). Les deux coïncident tant qu'il n'y a qu'UNE fin de
