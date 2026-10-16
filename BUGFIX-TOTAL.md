@@ -1,15 +1,63 @@
 # BUGFIX-TOTAL — Plan d'action pour un rendu audio et une synchro MIDI/MP3 irréprochables
 
-> **Nature du document : plan uniquement.** Aucun code n'a été modifié pour le
-> produire. Il synthétise l'analyse du dépôt (`js/`, `tools/`, `samples/`), la
-> lecture du bundle vendorisé `alphaTab 1.8.4` (`tools/vendor/alphaTab.js`) et
-> l'exécution des quatre harnais déjà présents.
+> **Nature du document : plan, désormais partiellement exécuté.** Les phases
+> **P0, P1, P2 et l'étape 12 de P5** sont **livrées et vérifiées** (commits
+> `cf9cfd7`, `d4028b7`, `15cb63c` sur `main`). Le reste est listé dans la section
+> « État d'avancement » ci-dessous ; l'analyse d'origine (§3–§9) est conservée, les
+> résultats mesurés sont en §11.
 >
 > **Objectif produit :** le MIDI doit sonner **au tempo de l'enregistrement**
 > (tempo variable de Guitar Pro inclus), la piste MP3 doit jouer **à sa vitesse
 > native** (aucun time-stretch), et les deux flux doivent rester **verrouillés en
 > phase** pendant toute la lecture, y compris aux répétitions, D.S./Coda et aux
 > frontières de tempo.
+
+---
+
+## État d'avancement et reste à faire (2026-10-16)
+
+| Phase | État | Preuve / ce qui reste |
+|---|---|---|
+| **P0** — mesure fiable | ✅ livré | `sync-audit` refondu + `mix-sync-harness` sur le code livré (§11.1) |
+| **P1** — spike stratégie C | ✅ livré | GO variante B (table de segments), variante A rejetée (§11.2) |
+| **P2** — tempo pré-cuit dans le MIDI | ✅ livré | **tempoWrites 0/14**, dérive croisière ≤ 11 ms, fidélité < 0,5 % (§11.4) |
+| **P3** — RC-1 résiduel (`barOccurrence`) | ⏳ **à faire** | instrumenter AC/DC & Renaud, décider **H1** (appariement) vs **H2** (donnée GP) |
+| **P4** — anacrouse & fin de morceau (D6) | ⏳ **à faire** | donner à l'anacrouse sa **durée notée** (Dr. Stein #0) |
+| **P5** — suite unique | 🟡 partiel | étape 12 ✅ (`tools/test-all.js`) ; étape 13 (navigateur) **différée** (exige `npm i`) |
+| **P6** — clôture doc & déploiement | ⏳ **à faire** | `BUG.md`/`BUGMP3.md` §14/`BUGLATEST.md`/`TESTSAMPLES.md` + `deploy/_build.ps1` |
+| **Validation d'écoute** | ⏳ **requise** | les 15 points du §7 (oreille humaine) |
+
+### Reste à faire, dans l'ordre
+
+1. **Validation d'écoute (bloquante, humaine).** Le correctif P2 change l'axe
+   temporel du synthé : il faut confirmer **à l'oreille** sur les zones du §7 —
+   en priorité **Iron Maiden** (M1 intro, M2 riffs), **AC/DC** (M6 saut D.S.),
+   **Blink 182** (M10), **Renaud** (M8/M9) et les **6 témoins** (M15). Protocole :
+   serveur local `python -m http.server 8777 --bind 127.0.0.1`, mode mix, ×1,0.
+   Contrôle transverse (M1/M4/M6/M14) : curseur de vitesse ×0,5 puis ×1,5.
+2. **P3 — RC-1 résiduel.** Instrumenter `barOccurrence` pour AC/DC et Renaud
+   (comparer les clés GPIF brutes à l'axe audio réel, **sans muter** le score).
+   Si l'anomalie est un **appariement** (H1) : réassigner **sélectivement** les
+   occurrences mal appariées (jamais les points déjà corrects — la tentative naïve
+   a régressé, BUGMP3 §12.2). Sinon, documenter **H2** (donnée GP) et remonter en
+   amont alphaTab. Sortie : `repeat-check` → clés manquantes AC/DC et Renaud **0**,
+   sans hausse de `danger`/`jumps` ; non-régression sur les 12 autres.
+3. **P4 — anacrouse.** Mesurer la durée réelle de l'anacrouse (Dr. Stein #0) dans
+   le GPIF et comparer webapp ↔ GP ↔ MP3 ; lui donner sa **durée notée** (pas une
+   mesure pleine). Sortie : durée totale webapp = durée MP3 (±0,5 %).
+4. **P5 étape 13 (optionnelle).** Test navigateur (Playwright/Puppeteer) chargé en
+   `http://`, lecture de 10 s, relecture de `[mix-stats]` : 0 coupure, dérive
+   bornée. À **isoler** (dépendance de dev, jamais d'exécution).
+5. **P6 — clôture.** Mettre à jour `BUG.md`, `BUGMP3.md` §14, `BUGLATEST.md`
+   (T1–T8 soldés), `TESTSAMPLES.md` (résultats d'écoute) ; rejouer
+   `deploy/_build.ps1` et vérifier `deploy/gp8-web/js/repeat-oracle.js` présent +
+   `samples/list.json` complet (D7).
+
+> **DoD rappel (§8)** : tempo au tempo de l'enregistrement + **0 écriture
+> `playbackSpeed`** en lecture ✅ ; dérive pic < 40 ms ✅ (croisière ≤ 11 ms) ;
+> **0 coupure de synthé** ✅ ; MP3 natif ✅ (0,32 % d'écritures de taux) ; 0 clé
+> GPIF manquante ⏳ (P3) ; durée webapp = MP3 ±0,5 % ⏳ (P4) ; `node
+> tools/test-all.js` → 0 ✅ ; `deploy/` régénéré ⏳ (P6) ; 15 points d'écoute ⏳.
 
 ---
 
@@ -55,6 +103,11 @@ Le plan propose de **supprimer les écritures de tempo en cours de lecture**
 (stratégie C : tempo modifié *pré-cuit* dans le MIDI — l'alphaTab public le
 permet, cf. §4), ce qui élimine RC-2 **et** RC-3 à la racine, puis de traiter
 RC-1 en parallèle.
+
+> **Suivi (2026-10-16).** Les défauts 1 et 2 sont **corrigés** (P2, §11.4) :
+> plus aucune écriture de tempo en lecture, dérive croisière ≤ 11 ms. Le défaut 3
+> (RC-1, appariement `barOccurrence`) reste ouvert → **P3**. Le verdict ci-dessus
+> décrit l'état **avant** P2 ; voir « État d'avancement » en tête de document.
 
 ---
 
@@ -305,7 +358,7 @@ tempo), et A en repli si C s'avère impossible sur un cas.
 > Chaque phase a un **critère de sortie mesurable**. Aucune phase ne démarre
 > avant que la précédente soit verte sur les harnais.
 
-### P0 — Rétablir la confiance dans la mesure *(bloquant)*
+### P0 — Rétablir la confiance dans la mesure *(bloquant)* ✅ fait — voir §11.1
 1. **Refondre `tools/sync-audit.js`** : retirer `fixAlternateEndings` (l.342-363),
    brancher `require('../js/repeat-oracle.js')` + `normalizeMultiClosingRepeats`
    extrait de `player.js`, comme `repeat-check.js`/`tempo-correct-sim.js`.
@@ -320,7 +373,7 @@ tempo), et A en repli si C s'avère impossible sur un cas.
 que le code livré ; les chiffres de `tempo-correct-sim` sont reproduits par le
 harnais réel à ±2 %.
 
-### P1 — Spike stratégie C *(décision go/no-go)*
+### P1 — Spike stratégie C *(décision go/no-go)* ✅ fait — voir §11.2
 4. Construire un prototype Node : `MidiFileGenerator.buildModifiedTempoLookup(score)`
    → régénérer le `MidiFile` (`new MidiFile()` + `AlphaSynthMidiFileHandler` +
    `MidiFileGenerator.generate()`) → **réécrire** les `TempoChangeEvent` aux ticks
@@ -363,7 +416,7 @@ les 14 échantillons ; écritures `playbackRate` ≤ 2 % du temps ; dérive pic
 **Résultat (14/14)** : tempoWrites **0**, dérive croisière **≤ 11 ms** (médiane
 des pics), 8 écritures de taux au total. ✅
 
-### P3 — RC-1 résiduel *(précision des sauts)*
+### P3 — RC-1 résiduel *(précision des sauts)* ⏳ à faire — voir « État d'avancement »
 9. Instrumenter `barOccurrence` : pour AC/DC et Renaud, comparer les clés GPIF
    brutes à l'axe audio réel (avance/retard d'une traversée) — **sans muter** le
    score (cf. BUGRENVOI S5).
@@ -374,14 +427,14 @@ des pics), 8 écritures de taux au total. ✅
 **Sortie :** `repeat-check` → clés manquantes AC/DC et Renaud **0**, sans
 augmentation des métriques `danger`/`jumps` ; non-régression sur les 12 autres.
 
-### P4 — Anacrouse & fin de morceau (D6)
+### P4 — Anacrouse & fin de morceau (D6) ⏳ à faire — voir « État d'avancement »
 11. Mesurer la durée réelle de la/les anacrouse(s) dans le GPIF (Dr. Stein #0) et
     comparer durée webapp ↔ GP ↔ MP3. Donner à l'anacrouse sa **durée notée**,
     pas une mesure pleine.
 **Sortie :** durée totale webapp = durée MP3 (±0,5 %) sur Dr. Stein et sur les
 fichiers à anacrouse ; aucune régression de synchro.
 
-### P5 — Durcissement & non-régression
+### P5 — Durcissement & non-régression 🟡 étape 12 faite, étape 13 différée
 12. ✅ `tools/test-all.js` **(fait — §11.6)** : exécute les 6 harnais, tableau
     récapitulatif, sortie 0/1. Chaque harnais porte ses seuils
     (`mix-sync-harness` : tempoWrites = 0, dérive croisière < 40 ms, écritures de
@@ -394,7 +447,7 @@ fichiers à anacrouse ; aucune régression de synchro.
 **Sortie :** suite verte sur les 14 échantillons ; `tools/test-all.js` en une
 commande.
 
-### P6 — Clôture documentaire & déploiement
+### P6 — Clôture documentaire & déploiement ⏳ à faire — voir « État d'avancement »
 14. Mettre à jour `BUG.md`, `BUGMP3.md` §14, `BUGLATEST.md` (T1-T8 soldés),
     `TESTSAMPLES.md` (résultats d'écoute).
 15. Rejouer `deploy/_build.ps1` et vérifier `deploy/gp8-web/js/repeat-oracle.js`
