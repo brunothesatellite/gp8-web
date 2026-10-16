@@ -4,3 +4,6 @@ deploy/gp8-web2/
 
 # dépendance de test téléchargée (alphaTab 1.8.4, ré-fetchée par tools/sync-audit.js)
 tools/vendor/alphaTab.js
+
+# test navigateur P5-13 (installé a part : cd tools/browser && npm i)
+tools/browser/node_modules/

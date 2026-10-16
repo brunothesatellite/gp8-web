@@ -86,6 +86,10 @@ if (VERBOSE) {
 }
 
 console.log('');
+/* Le harnais NAVIGATEUR (P5-13) est volontairement HORS de cette suite : il
+   exige `npm i` (playwright-core) et sort du « dépôt sans dépendance à
+   l'exécution ». Il se lance à part, depuis tools/browser/. */
+console.log('Harnais navigateur (P5-13), à part : cd tools/browser && npm i && npm test');
 console.log(bad === 0
   ? 'RESULTAT : OK — ' + rows.length + '/' + rows.length + ' harnais verts'
   : 'RESULTAT : ' + bad + ' harnais en échec sur ' + rows.length);
