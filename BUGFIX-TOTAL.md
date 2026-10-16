@@ -4,8 +4,9 @@
 > Il **remplace et fusionne** : `BUG.md`, `BUGMP3.md`, `BUGRENVOI.md`,
 > `BUGLATEST.md`, `RESPONSIVE.md`, `TESTSAMPLES.md`, `promp.md`, `TODO.md`
 > — tous supprimés le 2026-10-16 ; leur détail intégral reste dans l'historique
-> git. Seul autre document du dépôt : **`tools/browser/README.md`** (harnais
-> navigateur).
+> git. Autres documents du dépôt : **`TESTLOG.md`** (journal de test d'écoute à
+> remplir — version **opérationnelle** du §5.2/§5.3) et
+> **`tools/browser/README.md`** (harnais navigateur).
 >
 > **Nature** : les correctifs **P0 → P6 sont livrés et vérifiés**. Il ne reste que
 > des étapes **humaines** : l'**écoute** (§5.2) et la **validation mobile** (§7).
@@ -271,6 +272,11 @@ persiste ⇒ chemin **MIDI** ; couper le master MIDI → s'il persiste ⇒ chemi
 
 ### 5.3 Journal d'écoute (à remplir)
 
+> **Version opérationnelle, à remplir** : **`TESTLOG.md`** — une fiche par
+> morceau, avec les repères machine, les mesures précises à observer, la grille
+> commune T1-T7 et le journal des anomalies. Le tableau ci-dessous n'en est que
+> le résumé condensé (hérité de l'ancien `TESTSAMPLES.md`).
+>
 > Contexte **machine** par fichier : `points` = points de synchro du pont livré ;
 > `résidu` = clés GPIF non appariables (H2 = donnée GP). Les notes datées sont
 > **antérieures** au correctif P2 (2026-10-02), conservées **verbatim** — elles
