@@ -1,8 +1,16 @@
+> **État (2026-10-16)** : aucun bug **CRITICAL / MAJOR / MINOR** ouvert. Les deux
+> symptômes audio/mix consignés à l'origine (Dr. Stein « légers retours en
+> arrière », AC/DC « l'audio saute ») ont été diagnostiqués dans **BUGMP3 §14**
+> (RC-1/RC-2/RC-3) puis **corrigés** par le plan **BUGFIX-TOTAL.md** (P2/P3/P4) et
+> vérifiés **automatiquement** (§11 : 8 harnais + test navigateur réel). Restent,
+> hors code : la **validation d'écoute** (§7 de BUGFIX-TOTAL) et la validation
+> **mobile** (Pixel 7a).
+
 # CRITICAL
 * N/A
 
 # MAJOR
-* N/A*
+* N/A
 
 # MINOR
 * N/A

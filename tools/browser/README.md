@@ -22,7 +22,7 @@ Ce test est la seule exception, et elle est confinée :
 cd tools/browser
 npm i          # installe playwright-core (léger : pas de Chromium embarqué)
 npm test       # 3 exemples représentatifs (Sepultura, Dr. Stein, Renaud) ~2 min
-npm run test:all          # les 14 exemples du manifeste ~9 min
+npm run test:all          # les 15 exemples du manifeste ~10 min
 node run.js --headed      # navigateur visible (débogage, audio réel)
 node run.js --sample Renaud --seconds 15 --verbose
 ```
@@ -75,14 +75,16 @@ navigateur est **bornée par la zone morte du contrôleur (~100 ms)**, pas par l
 
 ## Résultat de référence (`npm run test:all`)
 
-**14/14** exemples verts : **0** écriture de `playbackSpeed` en lecture, 0 erreur
-console, dérive de croisière 11-92 ms. 8 exemples en 🟡 (cible stricte non
-atteinte). La trace P3 `[oracle] … résidu H2` réapparaît à l'identique
-(Renaud). Détail complet en `BUGFIX-TOTAL.md` §11.10.
+**15/15** exemples verts : **0** écriture de `playbackSpeed` en lecture, 0 erreur
+console, dérive de croisière 10-80 ms. 10 exemples en 🟡 (cible stricte non
+atteinte), 5 en ✅ (F-Zero X, Igorrr ×2, Led Zeppelin, Offspring). La trace P3
+`[oracle] … résidu H2` réapparaît à l'identique (Renaud). Détail complet en
+`BUGFIX-TOTAL.md` §11.10.
 
-> ⚠ Le test couvre les exemples du **manifeste** : `samples/list.json` n'a que
-> 14 entrées sur 15 (`The Four Horsemen` non listé). Le harnais le **signale** en
-> tête de sortie ; régénérer le manifeste (`gen-samples.bat`) relève de P6.
+> Le manifeste est **complet** depuis P6 : `samples/list.json` a **15** entrées,
+> une par `.gp` de `samples/` (`The Four Horsemen` inclus). Si un `.gp` est
+> ajouté, relancer `gen-samples.bat` — le harnais **signale** en tête de sortie
+> tout fichier présent sur disque mais absent du manifeste.
 >
 > ⚠ Comme l'app charge alphaTab/JSZip/police/soundfont depuis le **CDN**
 > jsdelivr, le test nécessite un accès réseau. Seuls les `<script>` de l'app

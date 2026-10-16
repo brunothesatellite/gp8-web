@@ -5,6 +5,15 @@ segment). Document de travail : les causes sont détaillées dans **BUGMP3.md §
 le suivi des écoutes est dans **TESTSAMPLES.md**. Celui-ci porte l'état *et la
 file d'attente*.
 
+> **⚠ Document historique — file d'attente SOLDÉE (2026-10-16).** L'état du §1 et
+> la file du §3 datent du **2026-10-02**, *avant* le plan **BUGFIX-TOTAL.md**, qui a
+> repris et clos les trois causes : RC-2 (coupures) et RC-3 (relais) → **P2**
+> (tempo **pré-cuit dans le MIDI**, `playbackSpeed` **jamais** écrit en lecture),
+> RC-1 (points perdus) → **P3** (réassignation sélective **sous garde**, résidu
+> classé **H2**). Le §1 n'est donc **plus** l'état courant : voir
+> **BUGFIX-TOTAL §11** et le **solde des T1–T8 au §3.0**. Conservé comme analyse
+> d'origine ; seule la **validation d'écoute** (BUGFIX-TOTAL §7) reste ouverte.
+
 ---
 
 ## 1. État stable livré (code en place, contrôles verts)
@@ -96,6 +105,19 @@ du temps au-delà de 2 %, Metallica 92 %→5 %.
 ---
 
 ## 3. Reste à faire (file d'attente ordonnée)
+
+### 3.0 Solde des T1–T8 (2026-10-16)
+
+| # | Objet | Sort |
+|---|---|---|
+| **T1** | confirmer RC-1 **à l'écoute** | **soldé côté mesure** : RC-1 revalidé hors navigateur (clés 94 → 72) **puis en navigateur réel** (`tools/browser/`, BUGFIX-TOTAL §11.10). L'écoute des points du §7 est la **dernière** étape (humaine) |
+| **T2** | coder RC-3 loi « protège » dans `mix-sync.js` | **soldé, autrement** : plutôt que d'ajouter une branche dans la zone morte, le contrôleur a été **réécrit** en P2 — le tempo est pré-cuit dans le MIDI et `playbackSpeed` n'est plus écrit en lecture. `mix-sync-harness` : `tempoWrites` **0/15** |
+| **T3** | arbitrer RC-2 (le vrai verrou) | **soldé** : la **voie 1** (pas d'écriture en lecture) a été obtenue **sans patch alphaTab** — le tempo vit dans le `MidiFile`. Plus d'écriture ⇒ plus de `resetSamples()`/`mainSeek()` ⇒ **0 coupure**. Les voies « contenir » (TEMPO_EPS) et « lisser » (voie 3) sont sans objet |
+| **T4** | remettre `tools/sync-audit.js` en phase | **soldé** (P0) : refondu, il exécute le **code livré** en `require` de `js/repeat-oracle.js`. Exécuté par `tools/test-all.js` (référence `écrit.tempo` = 405) |
+| **T5** | cas H1 (numérotation d'occurrence GP) | **soldé** : classé **H2** par l'instrumentation P3 — le `.gp` enregistre des traversées que le déroulé ne joue pas ; les **4** mesures H1 de Renaud (8/9/11/42) sont **détectées et refusées** par la garde. `tools/barocc-instrument.js`, BUGFIX-TOTAL §11.7 |
+| **T6** | documentation d'analyse | **soldé** : **BUGMP3 §14.8** (correction livrée), **BUG.md** remis à jour, **TESTSAMPLES.md** transformé en **journal d'écoute** (15 échantillons) |
+| **T7** | déploiement & mobile | **déploiement soldé** (P6) : `deploy/` **régénéré conforme** — `js/repeat-oracle.js` présent, les 8 `js/*.js` **identiques** au dépôt, `samples/list.json` **15** entrées, ni `tools/` ni `*.md` ni `node_modules`. **Mobile (Pixel 7a)** : reste à faire (hors harnais) |
+| **T8** | hygiène | **soldé** : les harnais de diagnostic sont **versionnés** dans `tools/` (`repeat-check`, `barocc-instrument`, `duration-check`, `mix-sync-harness`, `test-all`, `browser/`) ; `repeat-oracle` documente `walkMaxOcc`/`h1ShiftsOf` comme surface de diagnostic ; `mix-sync.js` est couvert par `mix-sync-harness` (plus de « miroir » à entretenir) |
 
 ### T1 — Confirmer RC-1 à l'écoute *(court, obligatoire avant toute autre
 modification audio)*
@@ -228,5 +250,7 @@ d'écritures tempo selon `TEMPO_EPS`), `slope-noise.js` (bruit de pente),
 `offsets.js` (départ mp3), `slayer-keys.js`, `sync-renvoi.js`. Déjà intégrés au
 dépôt : `tools/repeat-check.js`, `tools/tempo-correct-sim.js`.
 
-**Ce qui n'est PAS encore fait, en une ligne** : écoute navigateur (T1), loi
-RC-3 codée (T2), arbitrage RC-2 (T3).
+**Ce qui n'est PAS encore fait, en une ligne** : ~~écoute navigateur (T1)~~ ✅ revalidé
+en navigateur, ~~loi RC-3 codée (T2)~~ ✅ remplacée par la pré-cuisson du tempo (P2),
+~~arbitrage RC-2 (T3)~~ ✅ soldé par P2 — il ne reste que la **validation d'écoute**
+humaine (points du §7 de **BUGFIX-TOTAL**) et la validation **mobile**.

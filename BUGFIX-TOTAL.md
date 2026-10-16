@@ -1,10 +1,11 @@
 # BUGFIX-TOTAL — Plan d'action pour un rendu audio et une synchro MIDI/MP3 irréprochables
 
 > **Nature du document : plan, désormais exécuté.** Les phases
-> **P0, P1, P2, P3, P4 et P5** sont **livrées et vérifiées** (commits
-> `cf9cfd7`, `d4028b7`, `15cb63c`, `3d3fe27` sur `main`, puis le présent commit
-> P5-13). Le reste est listé dans la section « État d'avancement » ci-dessous ;
+> **P0, P1, P2, P3, P4, P5 et P6** sont **livrées et vérifiées** (commits
+> `cf9cfd7`, `d4028b7`, `15cb63c`, `3d3fe27`, `adc51d7`, plus le présent commit
+> P6). Le reste est listé dans la section « État d'avancement » ci-dessous ;
 > l'analyse d'origine (§3–§9) est conservée, les résultats mesurés sont en §11.
+> **Seul reste ouvert : la validation d'écoute (§7), humaine.**
 >
 > **Objectif produit :** le MIDI doit sonner **au tempo de l'enregistrement**
 > (tempo variable de Guitar Pro inclus), la piste MP3 doit jouer **à sa vitesse
@@ -23,8 +24,8 @@
 | **P2** — tempo pré-cuit dans le MIDI | ✅ livré | **tempoWrites 0/15**, dérive croisière ≤ 11 ms, fidélité < 0,5 % (§11.4 ; mesuré à 14 échantillons, reconfirmé à 15) |
 | **P3** — RC-1 résiduel (`barOccurrence`) | ✅ livré | `tools/barocc-instrument.js` ; renvois mesurés **104 → 72** clés manquantes, résidu **H2** (donnée GP) démontré, 4 mesures **H1** refusées par la garde (§11.7) |
 | **P4** — anacrouse & fin de morceau (D6) | ✅ livré | `tools/duration-check.js` : les **6** anacrouses jouées couvrent leur portée audio GPIF à **≤ 0,04 %** (Dr. Stein #0 : mesure VIDE au GPIF, audio = mesure pleine) ; fin de webapp **jamais** au-delà du MP3 (§11.8) |
-| **P5** — suite unique | ✅ livré | étape 12 : `tools/test-all.js`, **8** harnais déterministes ; étape 13 : test **navigateur** réel `tools/browser/` (Playwright isolé) — **14/14** exemples verts, **0** écriture de `playbackSpeed` (§11.10) |
-| **P6** — clôture doc & déploiement | ⏳ **à faire** | `BUG.md`/`BUGMP3.md` §14/`BUGLATEST.md`/`TESTSAMPLES.md` + `deploy/_build.ps1` ; `samples/list.json` **incomplet** (14/15) |
+| **P5** — suite unique | ✅ livré | étape 12 : `tools/test-all.js`, **8** harnais déterministes ; étape 13 : test **navigateur** réel `tools/browser/` (Playwright isolé) — **15/15** exemples verts, **0** écriture de `playbackSpeed` (§11.10) |
+| **P6** — clôture doc & déploiement | ✅ livré | `samples/list.json` **15/15** (`gen-samples.bat`) ; `deploy/` **régénéré conforme** (les **8** `js/*.js` identiques, `repeat-oracle.js` présent, ni `tools/` ni `*.md`) ; `BUG.md`, **`BUGMP3 §14.8`**, `BUGLATEST` (**T1-T8 soldés**), `TESTSAMPLES` (**journal d'écoute**, 15 entrées) (§11.11) |
 | **Validation d'écoute** | ⏳ **requise** | les 15 points du §7 (oreille humaine) |
 
 ### Reste à faire, dans l'ordre
@@ -50,14 +51,17 @@
 4. **P5 étape 13 — soldé** (§11.10). Test d'intégration **navigateur** livré sous
    `tools/browser/` : Playwright (`playwright-core`) + le Chrome/Edge **déjà
    installé** — dépendance de dev **isolée**, jamais d'exécution. L'app entière
-   est jouée (`cd tools/browser && npm i && npm test`) : **14/14** exemples
+   est jouée (`cd tools/browser && npm i && npm test`) : **15/15** exemples
    verts, **0** écriture de `playbackSpeed` en lecture, 0 erreur console.
-5. **P6 — clôture.** Mettre à jour `BUG.md`, `BUGMP3.md` §14, `BUGLATEST.md`
-   (T1–T8 soldés), `TESTSAMPLES.md` (résultats d'écoute) ; rejouer
-   `deploy/_build.ps1` (l'actuel `deploy/gp8-web/` est **antérieur à P2**) ;
-   régénérer `samples/list.json` (`gen-samples.bat`) qui n'a que **14** entrées
-   alors que la suite en teste **15** depuis l'ajout de
-   `Metallica (1983 - Kill 'Em All) - The Four Horsemen.gp` (commit `e183dcc`).
+5. **P6 — soldé** (§11.11). `BUG.md` (aucun bug ouvert), `BUGMP3 §14.8`
+   (cause → correctif), `BUGLATEST` (**T1-T8 soldés**), `TESTSAMPLES` (**journal
+   d'écoute**, 15 entrées) ; `samples/list.json` **régénéré** (`gen-samples.bat` →
+   **15/15**, `The Four Horsemen` inclus) ; `deploy/_build.ps1` **rejoué** →
+   `repeat-oracle.js` présent, les **8** `js/*.js` **identiques** au dépôt
+   (l'artefact était antérieur à P2), 15 `.gp`.
+6. **Il ne reste que l'oreille.** Les 15 points du §7 (dont le contrôle transverse
+   ×0,5/×1,5) et la validation **mobile** (Pixel 7a, BUGLATEST T7) — le journal
+   `TESTSAMPLES.md` est prêt à recevoir les verdicts.
 
 > **DoD rappel (§8)** : tempo au tempo de l'enregistrement + **0 écriture
 > `playbackSpeed`** en lecture ✅ ; dérive pic < 40 ms ✅ (croisière ≤ 11 ms) ;
@@ -66,7 +70,7 @@
 > durée webapp = MP3 ±0,5 % → **vérifiée sur 15/15** au sens utile (jamais
 > au-delà de la fin du MP3 ; l'écart négatif mesure la couverture des
 > sync-points) ✅ ; `node tools/test-all.js` → 0 ✅ (**8** harnais) ; `deploy/`
-> régénéré ⏳ (P6) ; 15 points d'écoute ⏳.
+> régénéré ✅ (P6) ; 15 points d'écoute ⏳ (seul reste).
 
 ---
 
@@ -462,15 +466,20 @@ alignées sur leur portée audio à **≤ 0,04 %** ; aucune régression de synch
     écriture de `playbackSpeed` en lecture, moteur + piste audio câblés,
     horloge qui avance, pas d'emballement de dérive, 0 erreur console.
 **Sortie :** suite déterministe verte sur les **15** échantillons ; test
-navigateur vert sur le **manifeste** (14/15 — `samples/list.json` à régénérer,
-P6) ; `tools/test-all.js` en une commande.
+navigateur vert sur le **manifeste** — régénéré à **15/15** en P6
+(`gen-samples.bat`, §11.11) ; `tools/test-all.js` en une commande.
 
-### P6 — Clôture documentaire & déploiement ⏳ à faire — voir « État d'avancement »
-14. Mettre à jour `BUG.md`, `BUGMP3.md` §14, `BUGLATEST.md` (T1-T8 soldés),
-    `TESTSAMPLES.md` (résultats d'écoute).
-15. Rejouer `deploy/_build.ps1` et vérifier `deploy/gp8-web/js/repeat-oracle.js`
-    présent + `samples/list.json` complet (D7).
-**Sortie :** documents cohérents, artefact de déploiement conforme.
+### P6 — Clôture documentaire & déploiement ✅ livrée *(§11.11)*
+14. ✅ `BUG.md` (aucun bug ouvert, renvoi vers le plan), `BUGMP3.md` **§14.8**
+    (correspondance cause → correctif + mesures), `BUGLATEST.md` (**T1-T8 soldés**,
+    marqué document historique), `TESTSAMPLES.md` (**journal d'écoute**, 15 entrées,
+    notes historiques conservées **verbatim**).
+15. ✅ `samples/list.json` **15/15** (`gen-samples.bat`) ; `deploy/_build.ps1`
+    **rejoué** : `deploy/gp8-web/js/repeat-oracle.js` **présent**, les **8**
+    `js/*.js` **identiques** au dépôt, `samples/` **15** `.gp`, ni `tools/` ni
+    `*.md` ni `node_modules` (D7).
+**Sortie :** documents cohérents, artefact de déploiement conforme — **atteinte**.
+Seuls restent la **validation d'écoute** (§7, humaine) et la validation **mobile**.
 
 ---
 
@@ -509,7 +518,7 @@ livré**. Les constantes/formules ne doivent exister qu'à **un seul endroit**
 | Pentes hors clamp `[0,5 ; 2]` | **0** | 🟡 résidu documenté (2+2+3+1 mesures sur 4 fichiers, §11.7) |
 | Anacrouse jouée vs **portée audio GPIF** | **≤ 0,5 %** | ✅ 6/6 ≤ 0,04 % (§11.8) |
 | Fin de webapp (axe audio) vs fin du MP3 | **≤ +0,5 %** | ✅ 15/15 (§11.8) |
-| Écritures de `playbackSpeed` en lecture **dans un navigateur réel** | **0** | ✅ 0/14 (§11.10, Playwright) |
+| Écritures de `playbackSpeed` en lecture **dans un navigateur réel** | **0** | ✅ 0/15 (§11.10, Playwright) |
 
 > ⚠ La cible initiale « écart durée MIDI ↔ **durée MP3** < 1 % » est **fausse** :
 > la portée des sync-points est plus courte que le MP3 sur 12/14 fichiers
@@ -519,7 +528,12 @@ livré**. Les constantes/formules ne doivent exister qu'à **un seul endroit**
 
 ### 6.4 Diagnostics obligatoires en console (déjà partiels, à compléter)
 - `[mix] N point(s) de synchro · X saut(s) · Y pente(s) hors plage`
-- `[mix] tempo hors plage …` → **doit disparaître** après P2/P3.
+- `[mix] tempo hors plage …` → **ne doit subsister que sur le résidu H2** : la
+  ligne signale un segment mal apparié, donc une **pente hors `[0,5 ; 2]`** — ce
+  qui ne peut venir que d'une clé GPIF non appariable (**ACDC, Renaud,
+  Offspring**, §11.7). Sur les **12** fichiers sans clé manquante, elle doit
+  avoir **disparu** (vérifiable en `--verbose`). Sur les trois autres, elle
+  documente la **divergence GP**, pas une régression.
 - `[mix-stats]` toutes les 5 s : `playbackSpeed écriture/s` (**doit = 0**),
   `playbackRate écriture/s`, `seek/s`, `arrêts maître`, `dérive max`.
 - `[oracle] N groupe(s) relevé(s) … clés manquantes a → b`.
@@ -550,7 +564,7 @@ simulation. D'où deux niveaux :
 2. **La dérive de croisière en navigateur est bornée par la ZONE MORTE, pas par
    40 ms.** `CONTROL_MS = 250` / `DEADBAND_MS = 100` / `WRITE_MS = 1500`
    (js/mix-sync.js) autorisent l'écart à respirer jusqu'à ~100 ms avant
-   correction : les 14 exemples la mesurent entre **11 et 92 ms**. Le seuil
+   correction : les 15 exemples la mesurent entre **10 et 80 ms**. Le seuil
    « < 40 ms » du §6.3 reste la mesure du banc déterministe (audio factice sans
    gigue) ; en navigateur, l'invariant défendable est « pas d'emballement »
    (< 150 ms) et « 0 écriture de vitesse en lecture » — ce dernier, le vrai
@@ -928,7 +942,7 @@ node tools/duration-check.js        # OK — anacrouses ≤ 0,04 %, fin ≤ fin 
 node tools/test-all.js              # RESULTAT : OK — 8/8 harnais verts
 ```
 
-### 11.10 P5-13 — test navigateur : **0 écriture de vitesse, 14/14** *(fait)*
+### 11.10 P5-13 — test navigateur : **0 écriture de vitesse, 15/15** *(fait)*
 
 **Ce qui tourne.** `tools/browser/run.js` sert le dépôt en `http://127.0.0.1`
 (contexte sûr → `AudioWorklet`), ouvre Chrome **déjà installé**
@@ -942,56 +956,105 @@ chemin `Samples` → `fetch` → `Player.loadFile`), clique **Lecture**, joue 21
 passe-plaques** sur `api.playbackSpeed` (le vrai setter d'alphaTab est appelé —
 comportement inchangé) pour mesurer la cible P2, absente du journal livré.
 
-**Résultat (`node run.js --all`, 14 exemples du manifeste, 21 s chacun)** :
+**Résultat — `node run.js --all`, les 15 exemples du manifeste, 21 s chacun :**
 
-| exemple | mes. | pts synchro | audio (s) | horloge (s) | audio joué (s) | `playbackSpeed` | dérive croisière | pic | arrêts | err |
-|---|---|---|---|---|---|---|---|---|---|---|
-| AC/DC — Highway to Hell | 43 | 68 | 310,1 | 20,9 | 19,8 | **0** | 12 ms | 12 ms | 0 | 0 |
-| Blink 182 — All the Small Things | 53 | 147 | 256,1 | 21,0 | 20,3 | **0** | 73 ms | 73 ms | 0 | 0 |
-| Europe — The Final Countdown | 103 | 58 | 309,1 | 20,8 | 20,7 | **0** | 24 ms | 43 ms | 0 | 0 |
-| F-Zero X — Goal BGM | 10 | 14 | 422,1 | 14,1 | 14,5 | **0** | 11 ms | 11 ms | 0 | 0 |
-| Helloween — Dr. Stein | 114 | 112 | 306,4 | 21,0 | 20,8 | **0** | 58 ms | 58 ms | 0 | 0 |
-| Igorrr — Blastbeat Falafel | 97 | 4 | 195,1 | 21,0 | 21,0 | **0** | 70 ms | 70 ms | 0 | 0 |
-| Igorrr — Headbutt | 159 | 18 | 224,5 | 21,0 | 20,9 | **0** | 92 ms | 92 ms | 0 | 0 |
-| Iron Maiden — Fear of the Dark | 127 | 137 | 438,2 | 20,9 | 20,8 | **0** | 25 ms | 25 ms | 0 | 0 |
-| Led Zeppelin — Immigrant Song | 38 | 64 | 146,8 | 21,0 | 20,9 | **0** | 20 ms | 20 ms | 0 | 0 |
-| Metallica — For Whom the Bell Tolls | 66 | 141 | 310,0 | 20,9 | 20,6 | **0** | 82 ms | 83 ms | 0 | 0 |
-| Renaud — Morgane de toi | 50 | 100 | 373,2 | 20,9 | 16,9 | **0** | 21 ms | 6 939 ms | 0 | 0 |
-| Sepultura — Amen | 63 | 168 | 267,1 | 21,0 | 20,8 | **0** | 79 ms | 79 ms | 0 | 0 |
-| Slayer — Hell Awaits | 138 | 149 | 378,1 | 20,8 | 20,5 | **0** | 70 ms | 70 ms | 1 | 0 |
-| The Offspring — Self Esteem | 51 | 251 | 257,9 | 21,0 | 20,9 | **0** | 23 ms | 23 ms | 0 | 0 |
+| exemple | mes. | pts synchro | audio (s) | horloge (s) | audio joué (s) | `playbackSpeed` | taux | dérive croisière | pic | arrêts | err | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| AC/DC — Highway to Hell | 43 | 68 | 310,1 | 21,2 | 20,0 | **0** | 0,0 % | 77 ms | 77 ms | 0 | 0 | 🟡 |
+| Blink 182 — All the Small Things | 53 | 147 | 256,1 | 21,1 | 20,4 | **0** | 13,3 % | 69 ms | 196 ms | 0 | 0 | 🟡 |
+| Europe — The Final Countdown | 103 | 58 | 309,1 | 20,8 | 20,7 | **0** | 13,3 % | 39 ms | 116 ms | 0 | 0 | 🟡 |
+| F-Zero X — Goal BGM | 10 | 14 | 422,1 | 14,1 | 14,5 | **0** | 0,0 % | 10 ms | 10 ms | 0 | 0 | ✅ |
+| Helloween — Dr. Stein | 114 | 112 | 306,4 | 21,2 | 21,0 | **0** | 0,0 % | 80 ms | 80 ms | 0 | 0 | 🟡 |
+| Igorrr — Blastbeat Falafel | 97 | 4 | 195,1 | 21,0 | 20,9 | **0** | 0,0 % | 26 ms | 33 ms | 0 | 0 | ✅ |
+| Igorrr — Headbutt | 159 | 18 | 224,5 | 21,1 | 20,9 | **0** | 0,0 % | 22 ms | 22 ms | 0 | 0 | ✅ |
+| Iron Maiden — Fear of the Dark | 127 | 137 | 438,2 | 21,0 | 20,6 | **0** | 0,0 % | 60 ms | 60 ms | 0 | 0 | 🟡 |
+| Led Zeppelin — Immigrant Song | 38 | 64 | 146,8 | 21,0 | 20,9 | **0** | 0,0 % | 22 ms | 22 ms | 0 | 0 | ✅ |
+| Metallica — The Four Horsemen | 179 | 240 | 432,6 | 20,3 | 20,1 | **0** | 0,0 % | 71 ms | 71 ms | 1 | 0 | 🟡 |
+| Metallica — For Whom the Bell Tolls | 66 | 141 | 310,0 | 20,9 | 20,6 | **0** | 0,0 % | 64 ms | 64 ms | 0 | 0 | 🟡 |
+| Renaud — Morgane de toi | 50 | 100 | 373,2 | 21,0 | 16,9 | **0** | 0,0 % | 70 ms | 6 939 ms | 0 | 0 | 🟡 |
+| Sepultura — Amen | 63 | 168 | 267,1 | 20,9 | 20,7 | **0** | 0,0 % | 62 ms | 62 ms | 0 | 0 | 🟡 |
+| Slayer — Hell Awaits | 138 | 149 | 378,1 | 20,6 | 20,4 | **0** | 0,0 % | 60 ms | 60 ms | 1 | 0 | 🟡 |
+| The Offspring — Self Esteem | 51 | 251 | 257,9 | 21,1 | 20,8 | **0** | 0,0 % | 21 ms | 21 ms | 0 | 0 | ✅ |
 
 **Ce que ça prouve :**
 
-- **0 écriture de `playbackSpeed` en lecture sur 14/14** — la cible de P2 est
+- **0 écriture de `playbackSpeed` en lecture sur 15/15** — la cible de P2 est
   tenue non plus seulement dans le banc (audio factice) mais dans un navigateur
   réel avec décodage MP3 : aucune coupure du synthé. C'est l'invariant de
   premier ordre.
-- **0 erreur console sur 14/14** ; le moteur et la piste audio embarquée sont
+- **0 erreur console sur 15/15** ; le moteur et la piste audio embarquée sont
   câblés partout (points de synchro > 0, durée audio > 0, audio réellement
   défilé).
-- **La dérive de croisière reste sous la zone morte** (11-92 ms) : aucune
+- **La dérive de croisière reste sous la zone morte** (10-80 ms) : aucun
   emballement, la boucle de correction travaille dans sa bande de conception
   (§6.5). Le pic élevé de **Renaud (6 939 ms)** n'est **pas** une dérive : c'est
   la taille d'un **saut de renvoi** (un seul `seek`, exactement la signature
-  attendue — « recadrages sauts », §6.3).
-- Les **🟡** (8/14) signalent seulement l'écart à la cible **stricte** du §6.3
+  attendue — « recadrages sauts », §6.3). Les écritures de taux montent à
+  **13,3 %** (Blink, Europe) mais restent sous le seuil (15 %) et, **sauf ces
+  deux-là, toutes les autres sont à 0 %**.
+- Les **🟡 (10/15)** signalent seulement l'écart à la cible **stricte** du §6.3
   (dérive < 40 ms), cible mesurée sur le banc déterministe ; ils ne sont pas des
-  échecs (§6.5).
+  échecs (§6.5). Les **✅ (5/15)** — F-Zero X, Igorrr ×2, Led Zeppelin,
+  Offspring — atteignent la cible stricte dans le navigateur. Les 2 « arrêts
+  maître » (Four Horsemen, Slayer) sont dans la tolérance (≤ 1 par exemple).
 - La trace **P3** réapparaît à l'identique dans le navigateur (Renaud) :
   `[oracle] P3 renumérotation GP (H1) : 0 mesure(s) réassignée(s) …, 4 rejetée(s)
   par la garde (clés manquantes 55 → 55) — résidu H2`.
+- **Nouveau en P6** : `The Four Horsemen`, **absent du manifeste** jusque-là,
+  est désormais **câblé et testé** (179 mes., 240 points, 0 écriture, 🟡).
 
-**Réserve de couverture** — le manifeste `samples/list.json` n'a que **14**
-entrées alors que `samples/` en contient **15** : le test le **signale**
-(`Metallica (1983 - Kill 'Em All) - The Four Horsemen.gp` non listé, non
-cliquable) et couvre donc 14/15. La régénération (`gen-samples.bat`) relève de
-P6.
+**Couverture — résolue en P6.** Le manifeste ne contenait que **14** entrées pour
+**15** `.gp` : le harnais le **signalait** en tête de sortie et ne couvrait que
+14/15. `gen-samples.bat` l'a régénéré (§11.11) → **15/15 entrées, 15/15 testées**,
+plus aucun fichier non listé.
 
 **Commandes**
 ```
 cd tools/browser && npm i      # playwright-core (devDependency locale, isolée)
 npm test                       # 3 exemples représentatifs (~2 min)
-npm run test:all               # les 14 exemples du manifeste (~9 min)
+npm run test:all               # les 15 exemples du manifeste (~10 min)
 node run.js --headed --verbose # navigateur visible, journal complet
+```
+
+### 11.11 P6 — clôture documentaire & déploiement *(fait)*
+
+**Manifeste d'exemples (D7).** `samples/list.json` n'avait que **14** entrées depuis
+l'ajout de `Metallica (1983 - Kill 'Em All) - The Four Horsemen.gp` (commit
+`e183dcc`) : l'exemple existait mais **n'était pas cliquable**. `gen-samples.bat`
+(le script du dépôt, rien d'autre) l'a régénéré → **15** entrées, `count: 15`. Le
+test navigateur ne signale plus de fichier non listé.
+
+**Déploiement.** `deploy/_build.ps1` **rejoué** (l'artefact datait d'**avant P2**) :
+
+| contrôle | résultat |
+|---|---|
+| `deploy/gp8-web/js/repeat-oracle.js` | **présent** (prise en charge sans modifier `_build.ps1` — il copie tout hors `tools/`, `*.md`, `gen-samples.bat`) |
+| les **8** `js/*.js` déployés vs dépôt | **identiques** (hash) — dont `mix-sync.js` **33 139 o** et `player.js` **51 403 o** (versions post-P2) |
+| `samples/` déployé | **15** `.gp` + `list.json` (`count` 15) |
+| exclusions | `tools/` **absent**, `*.md` **0**, `node_modules` **absent** |
+| total copié | **31** fichiers |
+
+**Réserve** — `deploy/gp8-web2/` (dossier ignoré par git) contient encore un
+`mix-sync.js` **antérieur à P2** (27 640 o). Il n'est **pas** produit par
+`_build.ps1` (qui ne crée que `gp8-web/`) : c'est un artefact d'une construction
+antérieure, **laissé en place** (à supprimer manuellement si inutile).
+
+**Documents.**
+
+| document | ce qui a changé |
+|---|---|
+| `BUG.md` | bandeau d'état : **aucun bug CRITICAL/MAJOR/MINOR** ouvert ; les 2 symptômes d'origine sont diagnostiqués (BUGMP3 §14) puis corrigés (P2/P3/P4) ; reste l'écoute + mobile. Typo `N/A*` corrigée |
+| `BUGMP3.md` | bandeau d'état + **§14.8** *Correction livrée* : tableau **RC-1/RC-2/RC-3 → P2/P3** avec les mesures, et ce qui **n'a pas** été corrigé (H1 de Renaud refusé par la garde) ; §12 et son « ordre d'attaque » marqués soldés |
+| `BUGLATEST.md` | marqué **document historique** (état du 2026-10-02, antérieur au plan) ; **§3.0 — solde des T1–T8** (T1 mesuré + revalidé navigateur, T2/T3 remplacés par P2, T4/T5/T6/T8 soldés, T7 déploiement soldé / mobile ouvert) |
+| `TESTSAMPLES.md` | transformé en **journal d'écoute** : 15 entrées (avec `The Four Horsemen`), contexte machine par fichier (points de synchro, résidu H1/H2), points §7 à cocher, notes du 2026-10-02 conservées **verbatim** |
+
+**Ce qui n'est pas fait, et ne peut pas l'être ici** : la **validation d'écoute**
+(§7) et la validation **mobile** (Pixel 7a, BUGLATEST T7) — deux étapes humaines.
+Le journal `TESTSAMPLES.md` est prêt à les recevoir.
+
+**Commandes**
+```
+gen-samples.bat                          # régénère samples/list.json (15 entrées)
+powershell -File deploy/_build.ps1       # reconstruit deploy/gp8-web/
+node tools/test-all.js                   # RESULTAT : OK — 8/8 harnais verts
 ```

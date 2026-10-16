@@ -10,6 +10,12 @@
 >
 > Questions posées : fichier GP particulier, **performance** sur gros fichiers,
 > **taux d'échantillonnage** du mp3, ou **synchro du mp3 dans le GP d'origine** ?
+>
+> **État (2026-10-16) : corrigé et vérifié automatiquement.** Les trois causes du
+> §14 (RC-1, RC-2, RC-3) ont été traitées par le plan **BUGFIX-TOTAL.md**
+> (P2/P3/P4) — voir **§14.8** (correspondance cause → correctif + mesures). Ce
+> document reste l'analyse d'origine, section par section ; seule la
+> **validation d'écoute** (points du §7 de BUGFIX-TOTAL) reste ouverte.
 
 ---
 
@@ -588,9 +594,12 @@ Ajoutés après la première passe, dans `js/player.js` + `js/mix-sync.js` :
 
 ## 12. Reste à faire — 2 bugs identifiés (dans l'ordre d'attaque)
 
-> **État** : 12.1 **corrigé** (voir §11.1-8). 12.2 **tenté puis retiré** (régresse) —
-> à ré-implémenter proprement. Le reste du texte est conservé comme documentation
-> de diagnostic.
+> **État (2026-10-16)** : 12.1 **corrigé** (§11.1-8). 12.2 **traité et soldé** —
+> la reconstruction sélective (« ne réassigner que les points réellement mal
+> appariés ») a été implémentée **sous garde** puis mesurée : le résidu restant est
+> une **donnée GP** (H2), les 4 cas réellement réassignables étant **refusés** par
+> la garde car ils ajouteraient 6 sauts. Voir **§14.8** et **BUGFIX-TOTAL §11.7**.
+> Le reste du texte est conservé comme documentation de diagnostic.
 
 ### 12.1 Bug des alternate endings (volta) — **cause racine de P3** — ✅ CORRIGÉ
 
@@ -659,6 +668,18 @@ propre grâce à la Phase 1) atterrit alors sur la **bonne** occurrence.
 > réel, en préservant les appariements déjà justes — et probablement de ne le faire
 > qu'une fois la couche 12.1 stabilisée sur tous les cas.
 
+> **✅ Soldé (P3, 2026-10-16).** L'implémentation **sélective** demandée ici est
+> livrée : `js/repeat-oracle.js` (étape 4 de `raise`) ne réassigne que les points
+> dont `barOccurence` ne correspond à aucun passage réel — le cas **H1**, où
+> l'ensemble des occurrences GP est exactement l'ensemble joué **translaté** — et
+> ne **conserve** la réassignation que si elle baisse les clés manquantes **sans**
+> ajouter de saut, de pente hors clamp ni de segment d'audio reculant. Chaque clé
+> manquante est classée **H1**/**H2** par `tools/barocc-instrument.js`.
+> Résultat : **104 → 72** clés manquantes ; **41 mesures H2** (donnée GP) ;
+> **4 mesures H1** (Renaud 8/9/11/42) **détectées et refusées** par la garde — les
+> couvrir ferait passer `jumps` de **7 à 13**. Détail : **BUGFIX-TOTAL §11.7** et
+> §14.8 ci-dessous.
+
 **Limite** : §9.6 corrige la couche « appariement ». Si alphaTab développe encore
 les répétitions un nombre de fois différent de l'enregistrement (couche 2), un saut
 résiduel peut subsister → à remonter en amont (alphaTab) si besoin.
@@ -667,9 +688,10 @@ résiduel peut subsister → à remonter en amont (alphaTab) si besoin.
 1. ~~**12.1** (alternate endings)~~ — ✅ corrigé (§11.1-8).
 2. ~~**MAIDEN (§13)** — tempo variable par segment~~ — ✅ **corrigé** (correction
    intégrale : horloge musicale ∫ + tempo par segment, voir §13).
-3. **12.2** (§9.6) — résidu restant ; à ré-implémenter **sélectivement** (ne
-   réassigner que les points réellement mal appariés), ou à remonter en amont
-   alphaTab pour la couche « nombre de passages ».
+3. ~~**12.2** (§9.6) — résidu restant~~ — ✅ **soldé** (P3, réassignation
+   sélective **sous garde**, BUGFIX-TOTAL §11.7) : le résidu restant est une
+   **donnée GP** (H2) ; la remontée amont alphaTab (couche « nombre de passages »)
+   reste **optionnelle** et non bloquante.
 
 ---
 
@@ -964,4 +986,32 @@ les saccades **Slayer** apparues avec `c7609e6`.
 * **RC-3** : ramener la vitesse **au neutre** (`sp × slope`) dès l'entrée en zone
   morte, pour que la dérive s'arrête d'elle-même — correcteur classique à
   bande morte *à sortie nulle*, cf. §9 « Cause A ».
+
+### 14.8 Correction livrée (2026-10-16) — les trois causes traitées
+
+> Analyse ci-dessus : **statique, aucun code modifié** (c'était la consigne).
+> Depuis, le plan **BUGFIX-TOTAL.md** a livré P0→P6. Correspondance cause →
+> correctif, avec la mesure :
+
+| cause (§14) | correctif livré | mesure |
+|---|---|---|
+| **RC-1** — `c7609e6` fait perdre 8 points à Slayer → 4 segments de pont étirés (pente jusqu'à 2,23) | **P3** — `js/repeat-oracle.js` : réassignation **sélective** des occurrences GP **sous garde** ; instrumentation `tools/barocc-instrument.js` (clé manquante → H1/H2) | clés manquantes **104 → 72** ; **Slayer, Blink, Offspring : 0** ; résidu **41 mesures H2** (donnée GP) + **4 H1 refusées** (Renaud). Aucune des métriques `danger`/`jumps`/`back` dégradée |
+| **RC-2** — chaque écriture de `playbackSpeed` = coupure totale du synthé (`resetSamples()` + re-rendu depuis 0) | **P2** — le tempo est **pré-cuit dans le MIDI** : des `TempoChangeEvent` par segment **sont insérés** dans le `MidiFile` chargé (`js/player.js`), et `playbackSpeed` n'est **plus jamais écrit en lecture**. La table de segments de `mix-sync.js` ne pilote plus le synthé | **0** écriture de `playbackSpeed` en lecture sur **15/15** (banc `mix-sync-harness`) et **15/15** (navigateur réel, **BUGFIX-TOTAL §11.10**) → **0 coupure** |
+| **RC-3** — zone morte à **sortie non nulle** : la vitesse biaisée reste appliquée, la dérive ressort par le bord opposé → relais ±5 % toutes les ~4 s | **P2** — le correcteur est **réécrit** ; la vitesse **utilisateur** est le seul écrivain de `playbackSpeed`, et **hors lecture**. L'écart résiduel est borné par la zone morte et corrigé par `playbackRate` (−10 %…+10 %), à écritures espacées | dérive croisière **≤ 11 ms** (banc), **10-80 ms** (navigateur, bornée par la zone morte 100 ms) ; écritures de taux **≤ 2 %** du temps |
+
+**Ce qui n'a PAS été corrigé, et pourquoi** — la réassignation **H1** de Renaud
+(mesures 8/9/11/42) est **refusée** par la garde : la couvrir ajouterait **6 sauts**
+(`jumps` 7 → 13) et ferait **reculer** un segment d'audio. Dans ce fichier,
+l'écart est une **donnée GP** (H2) : le `.gp` a enregistré plus de traversées que
+la partition n'en note. C'est exactement le précédent de **§12.2** (toute
+réassignation naïve régresse) — ici la décision est prise **par la mesure**, pas
+par un choix.
+
+**Conséquence audible attendue** — les saccades de Slayer (~1′) venaient de RC-1
+et RC-2 : les 4 segments à 0,50-0,69× n'existent plus (RC-1) et plus aucune note
+n'est coupée (RC-2). Le « moins bonne qualité » de Dr. Stein venait du relais
+RC-3 : la dérive n'oscille plus en permanence. Les 6 témoins (Europe, F-Zero X,
+Led Zeppelin, Sepultura, Metallica, Igorrr ×2) n'ont **aucun** point de synchro
+perdu ni pente hors clamp : strictement inchangés. Vérification **à l'oreille** :
+points du **§7 de BUGFIX-TOTAL**.
 
