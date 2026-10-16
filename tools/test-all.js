@@ -21,14 +21,17 @@ const path = require('path');
 const ROOT    = path.resolve(__dirname, '..');
 const VERBOSE = process.argv.includes('--verbose');
 
-/* Ordre : du moins coûteux au plus coûteux (le banc mix-sync lit 14 GP). */
+/* Ordre : du moins coûteux au plus coûteux (duration-check régénère
+   chaque .gp deux fois : génération + pont livré). */
 const SUITE = [
   ['load-smoke',          "ordre des <script>, bindings, App.boot / Samples.build"],
   ['repeat-check',        "renvois : clés GPIF manquantes, non-régression de l'oracle"],
+  ['barocc-instrument',   "RC-1 (P3) : clés manquantes classées H1/H2, sous référence"],
   ['tempo-correct-sim',   "loi « protège » sur playbackRate (modèle PRÉ-P2, référence)"],
   ['sync-audit',          "chemin livré : recadrages / glitchs / sauts par fichier"],
   ['tempo-prebake-spike', "pré-cuisson livrée : fidélité par segment < 0,5 %"],
-  ['mix-sync-harness',    "contrôleur RÉEL : tempoWrites = 0, dérive < 40 ms"]
+  ['mix-sync-harness',    "contrôleur RÉEL : tempoWrites = 0, dérive < 40 ms"],
+  ['duration-check',      "P4 : anacrouse ↔ portée audio GPIF, fin de webapp ≤ MP3"]
 ];
 
 if (!fs.existsSync(path.join(__dirname, 'vendor', 'alphaTab.js'))) {

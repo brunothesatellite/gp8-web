@@ -45,6 +45,8 @@
   /* index de mesure → dernière occurrence jouée, rempli par install() */
   const walkMaxOcc = new Map();
   let installed = false;
+  /* dernier rapport de `raise` (instrumentation P3, lu par les outils) */
+  let report = null;
 
   /* Clés GPIF de Guitar Pro : "mesure.occurrence". Un même couple peut revenir
      plusieurs fois (tempo en cours de mesure) : on déduplique pour ne compter
@@ -92,20 +94,65 @@
       while (ded.length && p.synthTime <= ded[ded.length - 1].synthTime) ded.pop();
       ded.push(p);
     }
-    let danger = 0, jumps = 0;
+    let danger = 0, jumps = 0, back = 0;
     for (let i = 0; i < ded.length - 1; i++) {
       const dt = ded[i + 1].synthTime - ded[i].synthTime;
       if (dt <= 0) continue;
       const sl = (ded[i + 1].syncTime - ded[i].syncTime) / dt;
       if ((sl > 2 && sl <= 3) || (sl >= 1 / 3 && sl < 0.5)) danger++;  // hors clamp
       if (sl > 3) jumps++;                                             // re-ancré
+      if (sl < 0) back++;                                              // audio qui RECULE
     }
-    return { nc, danger, jumps };
+    return { nc, danger, jumps, back };
   }
 
   /* Métriques publiques (diagnostic/console et outils de contrôle). */
   function metrics(score, MFG) {
     return metricsOf(score, MFG, gpKeysOf(score));
+  }
+
+  /* ---- P3 : renumérotations H1 PROUVÉES -----------------------------
+     Toutes les clés manquantes ne sont pas des traversées absentes. Sur une
+     mesure placée dans une fin de répétition (« volta »), Guitar Pro numérote
+     ses occurrences EN COMPTANT les passes où la volta SAUTE la mesure, alors
+     qu'alphaTab n'incrémente son compteur que quand la mesure est JOUÉE : la
+     numérotation de GP est alors décalée d'une constante, et chaque point est
+     ancré sur la mauvaise passe (mesuré sur Renaud : les points de la mesure 8
+     tombaient sur la passe 2 — 129 371 ms — au lieu de la passe 3 — 231 134 ms).
+
+     Signature exacte de ce cas (H1) : l'ensemble des occurrences GP d'une
+     mesure est EXACTEMENT l'ensemble joué {0 … walkMaxOcc} translaté — même
+     cardinalité, décalage constant ≠ 0. Dès que la cardinalité diffère, c'est
+     une TRAVERSÉE ABSENTE (H2, donnée GP) : aucun décalage ne la couvre, on ne
+     touche à rien.
+
+     Preuve indépendante de la classification : tools/barocc-instrument.js
+     confronte ces signatures aux offsets audio de GP. Renvoie
+     Map(index de mesure → décalage à retrancher). */
+  function h1ShiftsOf(score, gpKeys) {
+    const out = new Map();
+    if (!installed) return out;
+    const byBar = new Map();
+    for (const k of gpKeys) {
+      const d = k.lastIndexOf('.');
+      const b = Number(k.slice(0, d)), o = Number(k.slice(d + 1));
+      if (!byBar.has(b)) byBar.set(b, new Set());
+      byBar.get(b).add(o);
+    }
+    for (const [b, set] of byBar) {
+      const maxOcc = walkMaxOcc.get(b);
+      if (maxOcc === undefined) continue;        // mesure jamais jouée → H2
+      const G = Array.from(set).sort((x, y) => x - y);
+      const shift = G[0];                        // W commence toujours à 0
+      if (shift === 0) continue;
+      if (G.length !== maxOcc + 1) continue;     // cardinalité ≠ → traversée absente
+      let same = true;
+      for (let i = 0; i <= maxOcc; i++) {
+        if (G[i] - shift !== i) { same = false; break; }
+      }
+      if (same) out.set(b, shift);
+    }
+    return out;
   }
 
   /* Enveloppe `MidiFileGenerator._playThroughSong` — le seul point par lequel
@@ -157,6 +204,7 @@
      génération MIDI. Renvoie le nombre de groupes relevés (0 = rien à faire,
      y compris si l'enveloppe n'est pas posée : on ne devine jamais). */
   function raise(score, MFG, trace) {
+    report = null;
     try {
       if (!installed) return 0;
       const mbs = score && score.masterBars;
@@ -233,6 +281,53 @@
           `les points GPIF — clés manquantes ${nc0} → ${cur.nc}, ` +
           `pentes hors clamp ${cur.danger}, sauts ${cur.jumps}`);
       }
+
+      /* ---- 4. P3 : renumérotation H1, SÉLECTIVE et sous garde --------
+         Après le relèvement (le déroulé est alors définitif), on répare les
+         seules mesures dont GP a décalé la numérotation (H1, cf. h1ShiftsOf).
+         On MUTE les points de la mesure puis on RE-MESURE sur les clés
+         RELUES du score (les libellés ont changé) : la renumérotation n'est
+         CONSERVÉE que si elle fait STRICTEMENT baisser les clés manquantes
+         sans ajouter de pente hors clamp, de saut re-ancré NI de segment
+         d'audio RECULANT (`back` : la seule forme que `danger`/`jumps` ne
+         voient pas). Sinon elle est RESTITUÉE à l'identique — jamais de
+         perte, jamais de devinette.
+         Sur les données actuelles (Renaud, 4 mesures H1), la garde REFUSE :
+         couvrir 4 clés introduirait 6 sauts (7 → 13), car les mesures
+         voisines restent ancrées sur une autre passe — le résidu est donc
+         bien une donnée GP (H2), pas un appariement (cf. BUGFIX-TOTAL §11.7). */
+      const live = () => metricsOf(score, MFG, gpKeysOf(score));
+      const shifts = h1ShiftsOf(score, gpKeysOf(score));
+      const dg0 = cur.danger, jp0 = cur.jumps, bk0 = cur.back;
+      let h1Applied = 0, h1Rejected = 0, h1Keys = 0;
+      const h1Bars = [];
+      for (const [b, shift] of shifts) {
+        h1Bars.push(b);
+        const sps = score.masterBars[b].syncPoints || [];
+        const ncBefore = cur.nc;
+        for (const sp of sps) sp.syncPointValue.barOccurence -= shift;
+        const m = live();
+        if (m.nc < cur.nc && m.danger <= cur.danger && m.jumps <= cur.jumps &&
+            m.back <= cur.back) {
+          cur = m; h1Applied++; h1Keys += (ncBefore - m.nc);
+        } else {
+          for (const sp of sps) sp.syncPointValue.barOccurence += shift;  // restitué
+          h1Rejected++;
+        }
+      }
+      report = {
+        h1Detected: shifts.size, h1Applied, h1Rejected, h1Keys, h1Bars,
+        ncBefore: nc0, ncAfter: cur.nc,
+        dangerBefore: dg0, dangerAfter: cur.danger,
+        jumpsBefore: jp0, jumpsAfter: cur.jumps,
+        backBefore: bk0, backAfter: cur.back
+      };
+      if ((h1Applied || h1Rejected) && trace) {
+        trace('oracle', `P3 renumérotation GP (H1) : ${h1Applied} mesure(s) ` +
+          `réassignée(s) (${h1Keys} clé(s) couverte(s)), ${h1Rejected} rejetée(s) ` +
+          `par la garde (clés manquantes ${nc0} → ${cur.nc})` +
+          (h1Rejected ? ' — résidu H2 (donnée GP), voir BUGFIX-TOTAL §11.7' : ''));
+      }
       return raised;
     } catch (e) {
       if (trace) trace('oracle', 'échec : ' + e.message);
@@ -240,5 +335,11 @@
     }
   }
 
-  global.RepeatOracle = { install, raise, metrics, walkMaxOcc };
+  /* Rapport du dernier `raise` (diagnostic/outils) : nombre de mesures H1
+     détectées / réassignées / rejetées et comptes de clés avant/après. */
+  function lastReport() { return report; }
+
+  global.RepeatOracle = {
+    install, raise, metrics, walkMaxOcc, h1ShiftsOf, lastReport
+  };
 })(typeof window !== 'undefined' ? window : globalThis);

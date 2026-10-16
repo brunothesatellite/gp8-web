@@ -663,7 +663,7 @@
     }
 
     return {
-      build, prebake, segmentsFrom,
+      build, prebake, segmentsFrom, audioMsFor,
       onPosition, onState, resync, setRate, setCountIn,
       start, stop, suspend,
       setUserSpeed,

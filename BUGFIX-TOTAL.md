@@ -1,10 +1,10 @@
 # BUGFIX-TOTAL — Plan d'action pour un rendu audio et une synchro MIDI/MP3 irréprochables
 
-> **Nature du document : plan, désormais partiellement exécuté.** Les phases
-> **P0, P1, P2 et l'étape 12 de P5** sont **livrées et vérifiées** (commits
-> `cf9cfd7`, `d4028b7`, `15cb63c` sur `main`). Le reste est listé dans la section
-> « État d'avancement » ci-dessous ; l'analyse d'origine (§3–§9) est conservée, les
-> résultats mesurés sont en §11.
+> **Nature du document : plan, désormais exécuté.** Les phases
+> **P0, P1, P2, P3, P4 et l'étape 12 de P5** sont **livrées et vérifiées** (commits
+> `cf9cfd7`, `d4028b7`, `15cb63c` sur `main`, puis l'ajout P3/P4 ci-dessous). Le
+> reste est listé dans la section « État d'avancement » ci-dessous ; l'analyse
+> d'origine (§3–§9) est conservée, les résultats mesurés sont en §11.
 >
 > **Objectif produit :** le MIDI doit sonner **au tempo de l'enregistrement**
 > (tempo variable de Guitar Pro inclus), la piste MP3 doit jouer **à sa vitesse
@@ -20,11 +20,11 @@
 |---|---|---|
 | **P0** — mesure fiable | ✅ livré | `sync-audit` refondu + `mix-sync-harness` sur le code livré (§11.1) |
 | **P1** — spike stratégie C | ✅ livré | GO variante B (table de segments), variante A rejetée (§11.2) |
-| **P2** — tempo pré-cuit dans le MIDI | ✅ livré | **tempoWrites 0/14**, dérive croisière ≤ 11 ms, fidélité < 0,5 % (§11.4) |
-| **P3** — RC-1 résiduel (`barOccurrence`) | ⏳ **à faire** | instrumenter AC/DC & Renaud, décider **H1** (appariement) vs **H2** (donnée GP) |
-| **P4** — anacrouse & fin de morceau (D6) | ⏳ **à faire** | donner à l'anacrouse sa **durée notée** (Dr. Stein #0) |
-| **P5** — suite unique | 🟡 partiel | étape 12 ✅ (`tools/test-all.js`) ; étape 13 (navigateur) **différée** (exige `npm i`) |
-| **P6** — clôture doc & déploiement | ⏳ **à faire** | `BUG.md`/`BUGMP3.md` §14/`BUGLATEST.md`/`TESTSAMPLES.md` + `deploy/_build.ps1` |
+| **P2** — tempo pré-cuit dans le MIDI | ✅ livré | **tempoWrites 0/15**, dérive croisière ≤ 11 ms, fidélité < 0,5 % (§11.4 ; mesuré à 14 échantillons, reconfirmé à 15) |
+| **P3** — RC-1 résiduel (`barOccurrence`) | ✅ livré | `tools/barocc-instrument.js` ; renvois mesurés **104 → 72** clés manquantes, résidu **H2** (donnée GP) démontré, 4 mesures **H1** refusées par la garde (§11.7) |
+| **P4** — anacrouse & fin de morceau (D6) | ✅ livré | `tools/duration-check.js` : les **6** anacrouses jouées couvrent leur portée audio GPIF à **≤ 0,04 %** (Dr. Stein #0 : mesure VIDE au GPIF, audio = mesure pleine) ; fin de webapp **jamais** au-delà du MP3 (§11.8) |
+| **P5** — suite unique | 🟡 partiel | étape 12 ✅ (`tools/test-all.js`, **8** harnais) ; étape 13 (navigateur) **différée** (exige `npm i`) |
+| **P6** — clôture doc & déploiement | ⏳ **à faire** | `BUG.md`/`BUGMP3.md` §14/`BUGLATEST.md`/`TESTSAMPLES.md` + `deploy/_build.ps1` ; `samples/list.json` **incomplet** (14/15) |
 | **Validation d'écoute** | ⏳ **requise** | les 15 points du §7 (oreille humaine) |
 
 ### Reste à faire, dans l'ordre
@@ -35,29 +35,36 @@
    **Blink 182** (M10), **Renaud** (M8/M9) et les **6 témoins** (M15). Protocole :
    serveur local `python -m http.server 8777 --bind 127.0.0.1`, mode mix, ×1,0.
    Contrôle transverse (M1/M4/M6/M14) : curseur de vitesse ×0,5 puis ×1,5.
-2. **P3 — RC-1 résiduel.** Instrumenter `barOccurrence` pour AC/DC et Renaud
-   (comparer les clés GPIF brutes à l'axe audio réel, **sans muter** le score).
-   Si l'anomalie est un **appariement** (H1) : réassigner **sélectivement** les
-   occurrences mal appariées (jamais les points déjà corrects — la tentative naïve
-   a régressé, BUGMP3 §12.2). Sinon, documenter **H2** (donnée GP) et remonter en
-   amont alphaTab. Sortie : `repeat-check` → clés manquantes AC/DC et Renaud **0**,
-   sans hausse de `danger`/`jumps` ; non-régression sur les 12 autres.
-3. **P4 — anacrouse.** Mesurer la durée réelle de l'anacrouse (Dr. Stein #0) dans
-   le GPIF et comparer webapp ↔ GP ↔ MP3 ; lui donner sa **durée notée** (pas une
-   mesure pleine). Sortie : durée totale webapp = durée MP3 (±0,5 %).
+2. **P3 — soldé** (§11.7). L'instrumentation classe **toutes** les clés
+   manquantes : **72 = 41 mesures H2** (le .gp enregistre des traversées que le
+   déroulé ne joue pas) **+ 4 mesures H1** (Renaud 8/9/11/42) que la garde
+   **refuse** — les couvrir ajouterait 6 sauts. Sortie du plan atteinte par sa
+   clause « sinon documenter H2 et remonter en amont » (DoD #5). Reste, hors
+   périmètre webapp : remontée amont alphaTab (optionnelle).
+3. **P4 — soldé** (§11.8). L'anacrouse de Dr. Stein est **vide** dans le .gp
+   (`<Voices>-1 -1 -1 -1</Voices>`) : sa durée n'est PAS dans la notation, elle
+   n'est déductible que de l'audio. Les sync-points GPIF lui donnent exactement
+   **une mesure pleine** (1 599 ms à 150,77 BPM) → le correctif `fixEmptyAnacrusis`
+   livré est **justifié par la donnée**, pas arbitraire. Vérifié sur les 6
+   fichiers à anacrouse, écart ≤ 0,04 %.
 4. **P5 étape 13 (optionnelle).** Test navigateur (Playwright/Puppeteer) chargé en
    `http://`, lecture de 10 s, relecture de `[mix-stats]` : 0 coupure, dérive
    bornée. À **isoler** (dépendance de dev, jamais d'exécution).
 5. **P6 — clôture.** Mettre à jour `BUG.md`, `BUGMP3.md` §14, `BUGLATEST.md`
    (T1–T8 soldés), `TESTSAMPLES.md` (résultats d'écoute) ; rejouer
-   `deploy/_build.ps1` et vérifier `deploy/gp8-web/js/repeat-oracle.js` présent +
-   `samples/list.json` complet (D7).
+   `deploy/_build.ps1` (l'actuel `deploy/gp8-web/` est **antérieur à P2**) ;
+   régénérer `samples/list.json` (`gen-samples.bat`) qui n'a que **14** entrées
+   alors que la suite en teste **15** depuis l'ajout de
+   `Metallica (1983 - Kill 'Em All) - The Four Horsemen.gp` (commit `e183dcc`).
 
 > **DoD rappel (§8)** : tempo au tempo de l'enregistrement + **0 écriture
 > `playbackSpeed`** en lecture ✅ ; dérive pic < 40 ms ✅ (croisière ≤ 11 ms) ;
 > **0 coupure de synthé** ✅ ; MP3 natif ✅ (0,32 % d'écritures de taux) ; 0 clé
-> GPIF manquante ⏳ (P3) ; durée webapp = MP3 ±0,5 % ⏳ (P4) ; `node
-> tools/test-all.js` → 0 ✅ ; `deploy/` régénéré ⏳ (P6) ; 15 points d'écoute ⏳.
+> GPIF manquante → **clause H2 invoquée** (72 clés, 100 % classées, §11.7) ✅ ;
+> durée webapp = MP3 ±0,5 % → **vérifiée sur 15/15** au sens utile (jamais
+> au-delà de la fin du MP3 ; l'écart négatif mesure la couverture des
+> sync-points) ✅ ; `node tools/test-all.js` → 0 ✅ (**8** harnais) ; `deploy/`
+> régénéré ⏳ (P6) ; 15 points d'écoute ⏳.
 
 ---
 
@@ -416,35 +423,41 @@ les 14 échantillons ; écritures `playbackRate` ≤ 2 % du temps ; dérive pic
 **Résultat (14/14)** : tempoWrites **0**, dérive croisière **≤ 11 ms** (médiane
 des pics), 8 écritures de taux au total. ✅
 
-### P3 — RC-1 résiduel *(précision des sauts)* ⏳ à faire — voir « État d'avancement »
-9. Instrumenter `barOccurrence` : pour AC/DC et Renaud, comparer les clés GPIF
-   brutes à l'axe audio réel (avance/retard d'une traversée) — **sans muter** le
-   score (cf. BUGRENVOI S5).
-10. Si (et seulement si) l'anomalie est un **appariement** (H1) : réassigner
-    **sélectivement** les occurrences mal appariées (jamais les points déjà
-    corrects — la tentative naïve a régressé, BUGMP3 §12.2). Sinon documenter H2
-    et remonter en amont alphaTab.
-**Sortie :** `repeat-check` → clés manquantes AC/DC et Renaud **0**, sans
-augmentation des métriques `danger`/`jumps` ; non-régression sur les 12 autres.
+### P3 — RC-1 résiduel *(précision des sauts)* ✅ fait — voir §11.7
+9. ✅ Instrumenté : `tools/barocc-instrument.js` confronte les clés GPIF brutes
+   (`syncPointValue.barOccurence` + offsets audio) aux occurrences réellement
+   JOUÉES par le déroulé (`walkMaxOcc` rempli par le module livré) et classe
+   CHAQUE clé manquante **H1** (ensemble GP = ensemble joué translaté) ou **H2**
+   (traversée absente / mesure jamais jouée — donnée GP).
+10. ✅ Sous garde dans `js/repeat-oracle.js` (étape 4 de `raise`) : les mesures H1
+    sont **tentées** puis CONSERVÉES seulement si les clés manquantes baissent
+    strictement **sans** nouvelle pente hors clamp, nouveau saut re-ancré ni
+    segment d'audio reculant ; sinon **restituées**.
+**Sortie :** atteinte par la clause « sinon » de la DoD #5 — **72** clés
+manquantes, **41 mesures H2** (donnée GP) et **4 mesures H1** (Renaud 8/9/11/42)
+que la garde **refuse** (elles ajouteraient 6 sauts) ; non-régression sur les
+15 autres fichiers.
 
-### P4 — Anacrouse & fin de morceau (D6) ⏳ à faire — voir « État d'avancement »
-11. Mesurer la durée réelle de la/les anacrouse(s) dans le GPIF (Dr. Stein #0) et
-    comparer durée webapp ↔ GP ↔ MP3. Donner à l'anacrouse sa **durée notée**,
-    pas une mesure pleine.
-**Sortie :** durée totale webapp = durée MP3 (±0,5 %) sur Dr. Stein et sur les
-fichiers à anacrouse ; aucune régression de synchro.
+### P4 — Anacrouse & fin de morceau (D6) ✅ fait — voir §11.8
+11. ✅ Mesuré : la durée « notée » de l'anacrouse est **indéterminée dans la
+    notation** quand la mesure est vide (Dr. Stein : `isAnacrusis` + bar 0 sans
+    aucune voix) ; c'est la **portée audio GPIF** de la mesure qui tranche, et
+    elle vaut **exactement une mesure pleine**. Le correctif livré est donc
+    conservé et **prouvé** (harnais `tools/duration-check.js`).
+**Sortie :** fin de webapp ≤ fin du MP3 sur **15/15** ; anacrouses jouées
+alignées sur leur portée audio à **≤ 0,04 %** ; aucune régression de synchro.
 
 ### P5 — Durcissement & non-régression 🟡 étape 12 faite, étape 13 différée
-12. ✅ `tools/test-all.js` **(fait — §11.6)** : exécute les 6 harnais, tableau
-    récapitulatif, sortie 0/1. Chaque harnais porte ses seuils
-    (`mix-sync-harness` : tempoWrites = 0, dérive croisière < 40 ms, écritures de
-    taux ≤ 2 % du temps).
+12. ✅ `tools/test-all.js` **(fait — §11.6)** : exécute les **8** harnais (dont
+    `barocc-instrument` P3 et `duration-check` P4), tableau récapitulatif, sortie
+    0/1. Chaque harnais porte ses seuils (`mix-sync-harness` : tempoWrites = 0,
+    dérive croisière < 40 ms, écritures de taux ≤ 2 % du temps).
 13. ⏳ **Différé** : test d'intégration navigateur (Playwright/Puppeteer). Il
     exige `npm i` et sort du périmètre « dépôt sans dépendance à l'exécution » ;
     il sera fourni comme script isolé, à installer à part. Les harnais
     déterministes ci-dessus couvrent la logique ; l'oreille (P6 §7) couvre le
     rendu.
-**Sortie :** suite verte sur les 14 échantillons ; `tools/test-all.js` en une
+**Sortie :** suite verte sur les **15** échantillons ; `tools/test-all.js` en une
 commande.
 
 ### P6 — Clôture documentaire & déploiement ⏳ à faire — voir « État d'avancement »
@@ -469,23 +482,27 @@ livré**. Les constantes/formules ne doivent exister qu'à **un seul endroit**
 |---|---|---|
 | `tools/load-smoke.js` *(existant)* | les 8 `js/*.js` | ordre des scripts, bindings, `App.boot`/`Samples.build` → OK |
 | `tools/repeat-check.js` *(existant)* | `js/repeat-oracle.js` réel + `fixEmptyAnacrusis`/`normalizeMultiClosingRepeats` extraits | clés GPIF manquantes, `danger`, `jumps` : **non-régression** + gains de référence |
+| `tools/barocc-instrument.js` **(créé — P3)** | `repeat-oracle` réel + clés GPIF brutes du score | clés manquantes classées **H1**/**H2** par mesure, offsets audio GPIF ; **référence par fichier** (ACDC 12, Renaud 55, Offspring 5) |
 | `tools/tempo-correct-sim.js` *(existant)* | `repeat-oracle` réel, simulation des 3 lois — **modèle PRÉ-P2** (référence historique + arbitrage de la loi « protège » sur `playbackRate`) | écritures rate (A/N/P), étirement, recadrages : **P ≤ A** |
 | `tools/mix-sync-harness.js` **(à créer — P0)** | **`js/mix-sync.js` réel** | `nTempoLecture` (doit = **0** après P2), `nRate`, `nSeek`, dérive pic, `tempo hors plage` |
 | `tools/sync-audit.js` *(à refondre — P0)* | chemin réel | recadrages/glitchs/sauts par fichier, points GPIF couverts |
+| `tools/duration-check.js` **(créé — P4)** | chemin livré (`fixEmptyAnacrusis`, `repeat-oracle`, pré-cuisson, `MixSync.audioMsFor`) + GPIF/MP3 bruts | durée jouée de l'anacrouse vs **portée audio GPIF** (≤ 0,5 %), fin de webapp ≤ fin du MP3 |
 | `tools/test-all.js` **(à créer — P5)** | tous ci-dessus | sortie 0/1 + tableau récapitulatif |
 
 ### 6.3 Assertions cibles (après P2)
 | Assertion | Seuil | État P2 |
 |---|---|---|
-| Écritures `playbackSpeed` en lecture (hors geste utilisateur) | **0** sur les 14 | ✅ 0/14 |
-| Écart durée MIDI pré-cuit ↔ **portée audio des sync-points** (par segment continu non clampé) | **< 0,5 %** | ✅ 14/14 (pire 0,160 %) |
+| Écritures `playbackSpeed` en lecture (hors geste utilisateur) | **0** sur les 15 | ✅ 0/15 |
+| Écart durée MIDI pré-cuit ↔ **portée audio des sync-points** (par segment continu non clampé) | **< 0,5 %** | ✅ 15/15 (pire 0,234 %) |
 | Dérive croisière MP3↔MIDI (médiane des pics de fenêtre) | **< 40 ms** | ✅ ≤ 11 ms |
 | Dérive pic | = taille du saut (1 seek) ; pas un « glitch » | ✅ sauts uniquement |
-| Écritures `playbackRate` | **≤ 2 % du temps de lecture** | ✅ 8 écritures au total |
+| Écritures `playbackRate` | **≤ 2 % du temps de lecture** | ✅ 10 écritures au total |
 | Recadrages « glitch » (dérive dans un bloc continu) | **0** | ✅ 0 |
 | Recadrages « sauts » (discontinuités D.S./Coda) | **= 1 par discontinuité** | ✅ |
-| Clés GPIF manquantes | **0** (ou documentées H2) | ⏳ P3 |
-| Pentes hors clamp `[0,5 ; 2]` | **0** | ⏳ P3 |
+| Clés GPIF manquantes | **0** (ou documentées H2) | ✅ 72 — **41 mesures H2 documentées**, 4 H1 refusées (§11.7) |
+| Pentes hors clamp `[0,5 ; 2]` | **0** | 🟡 résidu documenté (2+2+3+1 mesures sur 4 fichiers, §11.7) |
+| Anacrouse jouée vs **portée audio GPIF** | **≤ 0,5 %** | ✅ 6/6 ≤ 0,04 % (§11.8) |
+| Fin de webapp (axe audio) vs fin du MP3 | **≤ +0,5 %** | ✅ 15/15 (§11.8) |
 
 > ⚠ La cible initiale « écart durée MIDI ↔ **durée MP3** < 1 % » est **fausse** :
 > la portée des sync-points est plus courte que le MP3 sur 12/14 fichiers
@@ -499,13 +516,16 @@ livré**. Les constantes/formules ne doivent exister qu'à **un seul endroit**
 - `[mix-stats]` toutes les 5 s : `playbackSpeed écriture/s` (**doit = 0**),
   `playbackRate écriture/s`, `seek/s`, `arrêts maître`, `dérive max`.
 - `[oracle] N groupe(s) relevé(s) … clés manquantes a → b`.
+- `[oracle] P3 renumérotation GP (H1) : … refusée(s) par la garde … résidu H2
+  (donnée GP), voir BUGFIX-TOTAL §11.7` (nouveau, P3 — n'apparaît que sur un
+  fichier qui porte des mesures H1, aujourd'hui **Renaud**).
 - `[tempo] N tempo(s) pré-cuit(s)` (nouveau, P2 — via `trace`).
 
 ---
 
 ## 7. Plan de tests manuels réduits
 
-> Objectif : **cibler** les samples et les zones à risque, sans réécouter les 14
+> Objectif : **cibler** les samples et les zones à risque, sans réécouter les 15
 > morceaux en entier. Protocole commun : serveur local
 > `python -m http.server 8777 --bind 127.0.0.1` → `http://localhost:8777/`,
 > mode **mix** (MIDI + MP3), vitesse 100 %. Pour chaque ligne : écouter la zone,
@@ -520,9 +540,9 @@ livré**. Les constantes/formules ne doivent exister qu'à **un seul endroit**
 | M4 | **Helloween — Dr. Stein** | **mes 16-19** (historique « légers retours en arrière ») | stabilité | **plus aucun retour**, tempo constant ≈ 1,22× |
 | M5 | Helloween | tout le morceau (1 seule frontière de tempo, 23 coupures avant) | continuité | 0 coupure de synthé |
 | M6 | **AC/DC — Highway to Hell** | **fin mes 17 ≈ 1:03** → **mes 6** (D.S. al Coda) | le saut de répétition | **un** saut propre ; à 1:03 le MP3 est vers 1:10-1:11 (**normal**, données GP) |
-| M7 | AC/DC | **mes 6-10** | « l'audio est faux alors que le MIDI est correct » (H1) | après P3 : audio aligné, sinon documenter |
-| M8 | **Renaud — Morgane de toi** | début : **mes 1-6** | séquence `1 2 3 4 · 1 2 3 5 · 1 2 3 6` | 3 traversées, audio calé |
-| M9 | Renaud | **mes 15-21** (volta à 4 fins) | 4 fins jouées dans l'ordre | audio calé à chaque fin |
+| M7 | AC/DC | **mes 6-10** | « l'audio est faux alors que le MIDI est correct » | **Verdict P3 (§11.7) : H2** — GP a enregistré 5 à 7 traversées de ces mesures là où le déroulé en joue 4-5 (clés manquantes 12). La structure notée diverge de l'enregistrement : **attendu**, aucun appariement ne peut la couvrir. Écouter qu'aucun **saut parasite** n'est ajouté |
+| M8 | **Renaud — Morgane de toi** | début : **mes 1-6** | séquence `1 2 3 4 · 1 2 3 5 · 1 2 3 6` | **H2 confirmé** : l'enregistrement joue la mes 5 **6 fois** (offsets 21 s / 30 s / 122 s / 131 s / 224 s / 233 s), le déroulé **3 fois**. Attendu : pas de saut parasite ; diverger de structure = donnée GP (à confirmer à l'oreille) |
+| M9 | Renaud | **mes 15-21** (volta à 4 fins) | 4 fins jouées dans l'ordre | 4 mesures H1 (8/9/11/42) **détectées et refusées** par la garde (elles ajouteraient 6 sauts) → l'ancrage passe 2/passe 3 reste inchangé |
 | M10 | **Blink 182 — All the Small Things** | **mes 6-10** | `6-7-8-9` ×3 puis `6-7-8-10` | 4 passages, fin 10 au bon endroit |
 | M11 | **Slayer — Hell Awaits** | **≈ 1:00** (le MP3 démarre à 1:04,7) | saccades historiques | 0 saccade, démarrage audio calé à 1:04,7 |
 | M12 | Slayer | **mes 44, 53, 117** (répétitions, 4 passages) | passages complets | tous les passages présents |
@@ -545,7 +565,7 @@ vitesse utilisateur × tempo pré-cuit **sans trou ni décalage**.
 
 ## 8. Critères d'acceptation (Definition of Done)
 
-1. **Tempo** : sur les 14 échantillons, le MIDI sonne au tempo de
+1. **Tempo** : sur les 15 échantillons, le MIDI sonne au tempo de
    l'enregistrement (tempo variable inclus) ; **0 écriture `playbackSpeed`** en
    cours de lecture (hors geste utilisateur).
 2. **Phase** : dérive MP3↔MIDI pic < 40 ms ; écart moyen < 10 ms en régime établi.
@@ -553,11 +573,15 @@ vitesse utilisateur × tempo pré-cuit **sans trou ni décalage**.
    permanent ; `|playbackRate − 1| ≤ 0,5 %` hors correction transitoire).
 4. **Structure** : `0` recadrage de dérive (glitch) ; `1` saut propre par
    discontinuité voulue ; `0` pente hors `[0,5 ; 2]`.
-5. **Données** : `0` clé GPIF manquante sur les 14 (ou anomalie de données GP
-   documentée et acceptée pour AC/DC/Renaud, sans impact audible).
-6. **Durée** : durée webapp = durée MP3 à ±0,5 %.
-7. **Tests** : `node tools/test-all.js` sort `0` ; aucun harnais « miroir » ne
-   subsiste ; `deploy/` régénéré et conforme.
+5. **Données** : `0` clé GPIF manquante sur les 15 — **clause « sinon » invoquée** :
+   anomalie de données GP documentée et acceptée (72 clés, **100 %** classées
+   H2/H1, §11.7), sans impact audible ; le mécanisme de réassignation H1 reste
+   actif sous garde.
+6. **Durée** : fin de webapp = fin du MP3 à ±0,5 % au sens utile — la webapp ne
+   dépasse **jamais** la fin du MP3 (15/15) ; l'écart négatif mesure la couverture
+   des sync-points du .gp (donnée), et l'anacrouse est alignée à ≤ 0,04 % (§11.8).
+7. **Tests** : `node tools/test-all.js` sort `0` (**8** harnais) ; aucun harnais
+   « miroir » ne subsiste ; `deploy/` régénéré et conforme.
 8. **Écoute** : les 15 points du §7 validés (dont les 6 témoins sans régression).
 
 ---
@@ -569,8 +593,8 @@ vitesse utilisateur × tempo pré-cuit **sans trou ni décalage**.
 | Stratégie C : les `TempoChangeEvent` insérés ne sont pas consommés par le séquenceur live | Spike P1 **avant** toute modification ; repli sur stratégie A (lissage + loi « protège ») |
 | Stratégie C : durée MIDI ≠ durée MP3 (segments d'extrémité mal extrapolés) | Test d'assertion durée (§6.3) ; extrapolation ad hoc du 1er/dernier segment |
 | Le worker empêche tout patch d'instance (D1) | C ne nécessite **aucun** patch de séquenceur : uniquement le `MidiFile` chargé |
-| RC-1 : réassigner les occurrences casse des appariements corrects (régression déjà constatée) | Réassignation **sélective** uniquement, garde-fous `danger`/`jumps`, non-régression sur les 12 autres |
-| `fixEmptyAnacrusis` en mesure pleine allonge la timeline | Mesure GPIF avant/après (P4) ; ne pas garder si durée diverge |
+| RC-1 : réassigner les occurrences casse des appariements corrects (régression déjà constatée) | Réassignation **sélective** uniquement, garde-fous `danger`/`jumps` (+ `back`), non-régression sur les 15 fichiers ; mesuré : la garde **refuse** les 4 H1 de Renaud (§11.7) |
+| `fixEmptyAnacrusis` en mesure pleine allonge la timeline | Mesure GPIF + audio avant/après (P4, `tools/duration-check.js`) : **confirmé** — la portée audio GPIF d'une anacrouse vide vaut exactement une mesure pleine (§11.8) |
 | Régression sur les morceaux aujourd'hui « parfaits » (Europe, F-Zero, Led Zep, Sepultura, Metallica, Igorrr) | Ces 6 sont des **témoins** dans chaque harnais et dans le test manuel (M15) |
 | Coût de la re-synthèse silencieuse sous-estimé par les harnais | Le harnais réel P0 + l'instrumentation `[mix-stats]` mesurent en navigateur ; la stratégie C l'annule par construction |
 | Déploiement périmé | Rejouer `_build.ps1`, vérifier `repeat-oracle.js` et `list.json` (P6) |
@@ -597,8 +621,8 @@ vitesse utilisateur × tempo pré-cuit **sans trou ni décalage**.
 | P0 | `tools/sync-audit.js`, `tools/mix-sync-harness.js` (nouveau), `js/mix-sync.js` (commentaires) |
 | P1 | `tools/` (spike, hors dépôt ou `tools/spike-tempo-bake.js`) |
 | P2 | `js/player.js`, `js/mix-sync.js`, `js/core.js` (buffer éventuel) |
-| P3 | `js/repeat-oracle.js` (réassignation sélective), `tools/repeat-check.js` |
-| P4 | `js/player.js` (`fixEmptyAnacrusis`) |
+| P3 | `js/repeat-oracle.js` (réassignation sélective sous garde), `tools/barocc-instrument.js` (nouveau) |
+| P4 | `js/player.js` (`fixEmptyAnacrusis` — **conservé**, justifié), `js/mix-sync.js` (`audioMsFor` exposé), `tools/duration-check.js` (nouveau) |
 | P5 | `tools/test-all.js` (nouveau), CI |
 | P6 | `BUG*.md`, `TESTSAMPLES.md`, `deploy/_build.ps1` (exécution) |
 
@@ -724,29 +748,145 @@ chacun, taille = celle du saut voulu — et le RC-1 résiduel (`barOccurrence`).
 ### 11.5 Commandes de vérification (état après P0 + P1 + P2)
 ```
 node tools/load-smoke.js            # OK
-node tools/repeat-check.js          # OK — clés 94 -> 72
+node tools/repeat-check.js          # OK — clés 104 -> 72 (15 échantillons)
 node tools/tempo-correct-sim.js     # OK — modèle PRÉ-P2 (référence historique)
 node tools/sync-audit.js            # OK — chemin livré, écrit.tempo = 405
-node tools/mix-sync-harness.js      # OK — tempoWrites 0/14, dérive croisière ≤ 11 ms
-node tools/tempo-prebake-spike.js   # OK — pré-cuisson livrée, 14/14 < 0,5 %
+node tools/mix-sync-harness.js      # OK — tempoWrites 0/15, dérive croisière ≤ 11 ms
+node tools/tempo-prebake-spike.js   # OK — pré-cuisson livrée, 15/15 < 0,5 %
 ```
 
 ### 11.6 P5 — suite unique *(fait)*
-`tools/test-all.js` **(nouveau)** exécute les 6 harnais en sous-processus et sort
+`tools/test-all.js` **(nouveau)** exécute les harnais en sous-processus et sort
 **0/1** (0 si tout est vert). Chaque harnais garde SON critère :
 
 | Harnais | Critère de sortie |
 |---|---|
 | `load-smoke` | ordre des scripts + bindings présents + `App.boot`/`Samples.build` |
 | `repeat-check` | aucune régression (clés GPIF, `danger`, `jumps`) |
+| `barocc-instrument` | RC-1 : chaque clé manquante classée H1/H2, sous référence par fichier |
 | `tempo-correct-sim` | loi « protège » : `P ≤ A` (recadrages + écritures) |
 | `sync-audit` | chemin livré, `écrit.tempo` = 405 (référence P0) |
-| `tempo-prebake-spike` | fidélité pré-cuisson : 14/14 segments < 0,5 % |
+| `tempo-prebake-spike` | fidélité pré-cuisson : 15/15 segments < 0,5 % |
 | `mix-sync-harness` | **tempoWrites = 0**, dérive croisière < 40 ms, taux ≤ 2 % du temps |
+| `duration-check` | anacrouses ↔ portée audio GPIF ≤ 0,5 % ; fin de webapp ≤ fin du MP3 |
 
 ```
-node tools/test-all.js              # RESULTAT : OK — 6/6 harnais verts
+node tools/test-all.js              # RESULTAT : OK — 8/8 harnais verts
 ```
 
 Le test navigateur (Playwright) reste **différé** : il exige `npm i`, hors du
 périmètre « dépôt sans dépendance à l'exécution ».
+
+### 11.7 P3 — RC-1 résiduel : **H2 (donnée GP)**, H1 refusé par la garde *(fait)*
+
+**Instrumentation** — `tools/barocc-instrument.js` (aucun miroir) : il installe
+`js/repeat-oracle.js`, relit les clés GPIF brutes du score
+(`masterBars[i].syncPoints` → `syncPointValue.barOccurence`, `millisecondOffset`),
+les confronte aux occurrences réellement jouées (`walkMaxOcc`, occurrence
+maximale jouée par mesure — les occurrences jouées sont contiguës à partir de 0)
+et classe chaque clé manquante :
+
+| Signature | Sens |
+|---|---|
+| **H1** | l'ensemble des occurrences GP de la mesure est **exactement** l'ensemble joué **translaté** (même cardinalité, décalage constant ≠ 0) → renumérotation prouvée, réparable |
+| **H2** | cardinalité différente, ou mesure jamais jouée → GP décrit une/des traversée(s) que le déroulé ne produit pas : **donnée du .gp**, aucun décalage ne peut la couvrir |
+
+**Mesure (code livré, 15 échantillons)** — clés manquantes **104 → 72** :
+
+| fichier | clés GPIF | manquantes | H1 | H2 (mesures) |
+|---|---|---|---|---|
+| ACDC (Highway to Hell) | 77 | **12** | — | 6 |
+| Renaud (Morgane de toi) | 142 | **55** | **4** (mes. 8/9/11/42) | 33 |
+| The Offspring (Self Esteem) | 112 | **5** | — | 2 |
+| les 12 autres | — | **0** | — | — |
+
+**Preuve indépendante (Renaud, mesures 8/9/11/42)** — offsets audio GPIF relevés :
+mes. 8 : GP occ `1@129 371` `2@231 134` — la mesure n'est jouée NI en passe 1 NI
+dans la notation ; alphaTab, qui n'incrémente son compteur **que** quand la
+mesure est jouée, la joue en occurrences 0 et 1. L'appariement actuel ancre donc
+la **passe 3** de la notation sur l'audio de la **passe 2**. Le décalage +1 est
+donc réel… mais **local** : les mesures voisines (10, 12, 14, 15, 16, 17-32,
+37-43) portent elles aussi 3 passes enregistrées contre 2 jouées (**H2**), et
+restent ancrées sur les passes 1-2.
+
+**Verdict de la garde** — appliquer les 4 décalages H1 (séparément **ou**
+atomiquement) fait baisser les clés manquantes (55 → 51) mais **ajoute 6 sauts**
+(`jumps` 7 → 13) et fait **reculer un segment d'audio** : la région passe 3
+pointerait vers l'audio de la passe 2 pendant que les mesures voisines pointent
+encore la passe 1-2 → discontinuité. La garde de `raise` (étape 4) **refuse**
+donc ces 4 réassignations et **restitue** les libellés à l'identique — aucune
+régression possible, la décision est prise par la mesure, pas par un choix.
+
+**Conclusion** — le résidu RC-1 est une **donnée GP** (le .gp a enregistré plus
+de traversées que la partition n'en notate), exactement le cas prévu par la
+clause « sinon documenter H2 et remonter en amont » (DoD #5) et par le précédent
+BUGMP3 §12.2 (toute réassignation naïve régresse). Le mécanisme H1 reste en place,
+documenté, et s'appliquera de lui-même si un futur .gp présente un décalage pur.
+
+### 11.8 P4 — anacrouse : **mesure pleine confirmée par l'audio** *(fait)*
+
+**Ce que dit la notation** (sondage alphaTab sur les 15 échantillons) :
+6 fichiers portent une anacrouse en mesure 0 — AC/DC, Blink 182, F-Zero X,
+Metallica (For Whom the Bell Tolls), The Offspring (durée notée **3 840 ticks =
+mesure pleine**, le correctif ne change rien) et **Helloween — Dr. Stein**, dont
+la mesure 0 vaut **0 tick**.
+
+**Ce que dit le .gp brut (Dr. Stein)** : `<MasterTrack><Anacrusis />` (GP8 ne
+stocke QUE le drapeau, jamais la durée) et la mesure 0 est **réellement vide** —
+`<Bar id="0"><Clef>…</Clef><Voices>-1 -1 -1 -1</Voices></Bar>`, tout comme le
+modèle alphaTab (4 voix vides, `isEmpty = true`). **Sa durée notée n'existe
+donc pas** : ni GP ni alphaTab ne peuvent la donner.
+
+**Ce qui tranche : les sync-points GPIF** (donnée brute, indépendante) :
+
+| repère | `FrameOffset` | temps |
+|---|---|---|
+| mesure 0, position 0 | 0 | 0 ms |
+| mesure 1, position 0 | 70 500 | **1 598,6 ms** |
+
+Or 4 temps à `ModifiedTempo` 150,77 = **1 591,9 ms** → **écart 0,42 %**. Une
+mesure pleine 4/4 est donc exactement ce que l'enregistrement consacre à cette
+mesure. Le correctif `fixEmptyAnacrusis` livré **restitue la durée mesurée par
+l'audio** ; ce n'est pas une convention, c'est la donnée.
+
+**Vérification automatique** — `tools/duration-check.js` relit, pour la mesure
+d'anacrouse : durée notée brute, durée après correctif, **portée audio GPIF**
+(1er point de la mesure → 1er point de la mesure suivante) et durée **jouée**
+relue sur l'axe pré-cuit livré :
+
+| fichier | notée avant | après correctif | portée audio | jouée | écart |
+|---|---|---|---|---|---|
+| ACDC | 3 840 t | 3 840 t | 2 259 ms | 2 259 ms | 0,04 % |
+| Blink 182 | 3 840 t | 3 840 t | 1 599 ms | 1 599 ms | 0,04 % |
+| F-Zero X | 3 840 t | 3 840 t | 1 473 ms | 1 473 ms | 0,00 % |
+| **Helloween (Dr. Stein)** | **0 t (VIDE)** | **3 840 t** | **1 599 ms** | **1 599 ms** | **0,00 %** |
+| Metallica (FWTBT) | 3 840 t | 3 840 t | 2 027 ms | 2 027 ms | 0,00 % |
+| The Offspring | 3 840 t | 3 840 t | 2 408 ms | 2 408 ms | 0,01 % |
+
+**Durée totale (DoD #6)** — la fin de la webapp est mesurée **sur l'axe audio**,
+par le pont livré lui-même (`MixSync.audioMsFor` sur l'axe pré-cuit total,
+exactement ce que `targetSeconds()` vise) : **15/15** fichiers terminent **au
+plus** à la fin du MP3 (aucun dépassement → le synthé ne joue jamais seul après
+la fin de l'audio). L'écart négatif (−0,1 % à −42,6 %) mesure la **couverture**
+des sync-points du .gp : quand elle est < 100 %, c'est l'audio qui termine le
+morceau — donnée du fichier (§11.2.3), pas défaut. Sepultura, seule couverture
+100 %, est à **+0,08 %** — dans la tolérance. ⚠️ L'axe pré-cuit total (journalisé
+par le harnais) **n'est pas comparable** au MP3 : sauts et segments clampés le
+rendent non additif (piège de mesure identifié par la refonte P0).
+
+**Conclusion** — D6 est clos : la mesure pleine est **justifiée par la donnée**
+sur Dr. Stein comme sur les 5 autres, à ≤ 0,04 % près. Aucun changement de code
+n'était nécessaire : le correctif livré est le bon.
+
+### 11.9 Commandes de vérification (état après P0 → P4)
+```
+node tools/load-smoke.js            # OK
+node tools/repeat-check.js          # OK — clés 104 -> 72
+node tools/barocc-instrument.js     # OK — 72 clés : 41 mesures H2 + 4 H1 refusées
+node tools/sync-audit.js            # OK — chemin livré
+node tools/tempo-correct-sim.js     # OK — modèle PRÉ-P2 (référence)
+node tools/tempo-prebake-spike.js   # OK — pré-cuisson, 15/15 < 0,5 %
+node tools/mix-sync-harness.js      # OK — tempoWrites 0/15, dérive croisière ≤ 11 ms
+node tools/duration-check.js        # OK — anacrouses ≤ 0,04 %, fin ≤ fin du MP3
+node tools/test-all.js              # RESULTAT : OK — 8/8 harnais verts
+```
