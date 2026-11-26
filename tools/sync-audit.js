@@ -17,8 +17,11 @@
    de playbackRate, dérive pic, et le « burst » de seeks (max de seeks dans
    1,5 s) — l'indicateur direct d'un BALAYAGE de discontinuité.
 
-   ⚠ Les constantes et formules ci-dessous sont le MIROIR de
-     js/mix-sync.js. En cas de modification de l'une, modifier l'autre.
+   ⚠ Les constantes de PENTE/SAUT sont le MIROIR de js/mix-sync.js (P0),
+     mais la simulation `speedAt`/`TEMPO_EPS` reste le modèle PRÉ-P2 (écriture
+     de tempo en lecture). La référence du contrôleur livré est
+     tools/mix-sync-harness.js ; la carte de synchro est auditée par
+     tools/sync-coherence.js.
 
    MISE EN PHASE (BUGFIX-TOTAL.md §2.3 — fait) : le score est reconstruit
    par le MÊME chemin que l'application :
@@ -50,8 +53,8 @@ const AT_URL  = 'https://cdn.jsdelivr.net/npm/@coderline/alphatab@1.8.4/dist/alp
 /* --- constantes MIROIR de js/mix-sync.js (garder en phase !) -------- */
 const HOLD_MS = 400, SOFT_MS = 25, NUDGE = 0.10, GAIN = 2000;
 const CONTROL_MS = 250, DEADBAND_MS = 100, WRITE_MS = 1500, RATE_EPS = 0.03;
-const JUMP_SLOPE = 3.0, SLOPE_MIN = 0.5, SLOPE_MAX = 2.0;
-const TEMPO_EPS = 0.04, TEMPO_HOLD_MS = 300;   // §13 : tempo par segment
+const JUMP_SLOPE = 3.0, FORWARD_JUMP_MS = 1500, SLOPE_MIN = 0.2, SLOPE_MAX = 12.0;
+const TEMPO_EPS = 0.04, TEMPO_HOLD_MS = 300;   // §13 : tempo par segment (LEGACY)
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -159,7 +162,9 @@ function analyzeSegments(points) {
     if (!q) { p.jump = false; p.slope = 1; p.rawSlope = 1; continue; }
     const dt = q.t - p.t, da = q.a - p.a;
     p.rawSlope = dt > 0 ? da / dt : 1;
-    p.jump = (da < 0) || (p.rawSlope < 1 / JUMP_SLOPE) || (p.rawSlope > JUMP_SLOPE);
+    const isTail = (i === n - 2);
+    const forwardJump = p.rawSlope > JUMP_SLOPE && da > FORWARD_JUMP_MS;
+    p.jump = (da < 0) || (!isTail && (p.rawSlope < 1 / JUMP_SLOPE || forwardJump));
     p.slope = clamp(p.rawSlope, SLOPE_MIN, SLOPE_MAX);
     if (p.jump) nJump++;
     else if (p.rawSlope < SLOPE_MIN || p.rawSlope > SLOPE_MAX) nOff++;

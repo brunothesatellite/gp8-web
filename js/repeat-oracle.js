@@ -1,58 +1,61 @@
-/* ===== Correctif RC-1 : traversées de répétition pilotées par Guitar Pro =====
-   cf. BUGFIX-TOTAL.md §2.1 (RC-1) et §3
+/* ===== Correctif RC-1 / P1 : plan de lecture piloté par les points GPIF =====
+   cf. ANALYSE-AUDIO-SYNC-2026-11-26.md §5.1 (P1)
 
-   PROBLÈME. Quand le déroulé alphaTab (`repeatCount`) joue MOINS de
-   traversées que Guitar Pro n'en a enregistrées dans ses points de synchro,
-   la marche saute des passages qui existent pourtant dans l'enregistrement.
-   Le pont audio doit alors couvrir un long écart d'audio avec une courte
-   plage de partition : la pente du segment sort du clamp [0,5 ; 2] et
-   `playbackSpeed` est plaqué à 0,50-0,69× pendant plusieurs secondes
-   (« [mix] tempo hors plage »). C'est la régression `c7609e6` : la
-   suppression de `fixAlternateEndings` a fait tomber Slayer de 148/148 à
-   140/148 points GPIF couverts.
+   PROBLÈME. `MidiPlaybackController` d'alphaTab ne joue pas toujours les mêmes
+   traversées que l'enregistrement : numérotation `barOccurence` de Guitar Pro
+   décalée (H1), voltes multi-fins, reprises imbriquées, D.S./D.C., passages
+   supplémentaires dans l'audio (H2). Le pont audio devait alors couvrir des
+   écarts avec des pentes énormes, ou sauter des sections : d'où les « sauts »
+   et les accélérations/ralentissements.
 
-   POURQUOI PAS L'ANCIEN HEURISTIQUE. `fixAlternateEndings` relevait
-   `repeatCount` jusqu'à la plus haute alternance MAXIMALE lue dans les
-   masques (`maxEnd`). Exacte sur Slayer, elle est FAUSSE sur AC/DC (même
-   forme de notation, lecture attendue différente : 2 passes, validées par
-   l'utilisateur) et elle détruisait Renaud (119 → 61 mesures). Deviner la
-   partition dans les masques est donc sans issue.
+   SOLUTION P1. Pour un score AVEC piste audio embarquée, on ne laisse plus le
+   contrôleur décider seul du déroulé. On construit un PLAN DE LECTURE :
 
-   PRINCIPE. On demande la réponse à Guitar Pro lui-même : ses points de
-   synchro portent le couple (mesure, occurrence), c'est-à-dire la liste
-   exacte des traversées que l'enregistrement contient. On relève
-   `repeatCount` au MINIMUM qui couvre ces clés, puis on n'accepte un
-   relèvement QUE si aucune des trois métriques du pont ne se dégrade :
-     1. clés GPIF manquantes          → doit DIMINUER (c'est l'objet) ;
-     2. pentes hors du clamp [0,5 ; 2] → ne doit pas AUGMENTER (sinon on
-        invente un nouveau « MIDI à 0,5× ») ;
-     3. sauts re-ancrés (pente > 3)    → ne doit pas AUGMENTER (chaque saut =
-        un recadrage sec en lecture).
-   Tout groupe sans clé manquante, tout relèvement sans effet (cas H1 d'AC/DC
-   où la numérotation de GP ne colle pas) est laissé intact. Mesuré sur les 14
-   échantillons (harnais) : Slayer 8 → 0 clé manquante et 1 → 0 pente hors
-   clamp, Blink 9 → 0, Offspring 15 → 9, AC/DC 16 → 12, AUCUN fichier
-   dégradé — l'ancien fix, lui, totalisait 130 manquantes (pire que rien).
+     1. on capture la séquence de notation P (barres réellement jouées par le
+        contrôleur, occurrences comprises) ;
+     2. on liste les passes GPIF G, triées par temps audio (chaque passe =
+        un couple mesure/occurrence GP avec ses points) ;
+     3. on apparie G et P par LCS sur l'INDICE DE MESURE (les numéros
+        d'occurrence GP ne sont pas une identité fiable) ;
+     4. on produit un plan qui contient TOUTES les passes GPIF dans l'ordre
+        audio, en insérant les mesures de notation sans point GPIF entre les
+        ancres. Chaque passe GPIF est réécrite avec l'occurrence réelle du
+        plan (`syncPointValue.barOccurence`), donc `generateSyncPoints` et la
+        pré-cuisson la voient exactement une fois.
+     5. le MIDI est généré en parcourant ce plan : mêmes callbacks que le
+        générateur alphaTab (`generateMasterBar`, `generateTracks`,
+        `_processBarTime`), donc tempos, changements de signature et points de
+        synchro restent générés par le code vendor.
 
-   Le déroulé réel n'est PAS dupliqué : `_playThroughSong` appelle
-   `generateMasterBar(bar, …, occurence)` à chaque mesure jouée, on s'y branche
-   pour lire les occurrences sur le vif (`install`). Le fichier est volontaire
-   autonome (aucun accès DOM) pour être aussi exécutable sous Node par les
-   outils de contrôle. */
+   Résultat : plus de clé GPIF perdue par un compteur d'occurrence, plus de
+   D.S./volta interprété à l'envers. Les morceaux sans audio gardent le
+   déroulé alphaTab d'origine (wrapper `normalize` + `_playThroughSong`).
+
+   Le module reste autonome (aucun DOM), exécutable sous Node par les outils.
+   ================================================================== */
 'use strict';
 (function (global) {
 
-  /* index de mesure → dernière occurrence jouée, rempli par install() */
-  const walkMaxOcc = new Map();
-  /* plafond de tours de relèvement dans `raise` (mesuré : 2 au plus) */
-  const RAISE_MAX_PASSES = 4;
+  const QUARTER = 960;                 // MidiUtils.QuarterTime (alphaTab)
+  const planCache = new WeakMap();
+
   let installed = false;
-  /* dernier rapport de `raise` (instrumentation P3, lu par les outils) */
+  let _MFG = null;
+  let _rawPlay = null;
+  let _normalize = null;
+  let _trace = null;
   let report = null;
 
-  /* Clés GPIF de Guitar Pro : "mesure.occurrence". Un même couple peut revenir
-     plusieurs fois (tempo en cours de mesure) : on déduplique pour ne compter
-     qu'une seule clé. */
+  /* index de mesure → dernière occurrence jouée (compatibilité outils) */
+  const walkMaxOcc = new Map();
+  /* séquence complète des passes jouées : { bar, occ, tick } */
+  let walkSeq = [];
+
+  function hasAudio(score) {
+    return !!(score && score.backingTrack && score.backingTrack.rawAudioFile);
+  }
+
+  /* Clés GPIF de Guitar Pro : "mesure.occurrence". */
   function gpKeysOf(score) {
     const keys = new Set();
     const mbs = score && score.masterBars;
@@ -69,21 +72,281 @@
     return keys;
   }
 
-  /* Les trois métriques du pont, sur une seule passe generateSyncPoints :
-       nc     clés GPIF manquantes (le déroulé ne joue pas ce qu GP enregistré),
-       danger segments dont la pente sort du clamp [0,5 ; 2] → MIDI plaqué à
-              0,5× pendant plusieurs secondes (« [mix] tempo hors plage ») ;
-       jumps  segments à pente > 3, re-ancrés : un recadrage sec en lecture.
-     Lignes de tri et d'écrasement des temps synthé identiques à celles du
-     pont livré. Exige l'enveloppe posée (install) : c'est elle qui alimente
-     walkMaxOcc. Renvoie null si l'observatoire est absent. */
+  /* Groupes de points GPIF par passe (mesure, occurrence GP), triés par
+     premier offset audio. Plusieurs points d'une même passe (tempo en cours
+     de mesure) restent groupés. */
+  function gpGroupsOf(score) {
+    const map = new Map();
+    const mbs = score && score.masterBars;
+    if (!mbs) return [];
+    for (let i = 0; i < mbs.length; i++) {
+      for (const sp of mbs[i].syncPoints || []) {
+        const v = sp && sp.syncPointValue;
+        if (!v || typeof v.barOccurence !== 'number' || v.barOccurence < 0) continue;
+        if (!isFinite(v.millisecondOffset)) continue;
+        const key = i + '.' + v.barOccurence;
+        if (!map.has(key)) map.set(key, {
+          bar: i, occ: v.barOccurence, ms: v.millisecondOffset, points: []
+        });
+        const g = map.get(key);
+        g.points.push(sp);
+        if (v.millisecondOffset < g.ms) g.ms = v.millisecondOffset;
+      }
+    }
+    return [...map.values()].sort((a, b) => a.ms - b.ms);
+  }
+
+  /* Séquence de notation P, avec la normalisation des fins multiples. On
+     utilise le `_playThroughSong` BRUT (pas notre wrapper) pour éviter toute
+     récursion ; le plan ne dépend pas des repeatCount ensuite. */
+  function captureNotation(score) {
+    const out = [];
+    const restore = typeof _normalize === 'function' ? _normalize(score) : null;
+    try {
+      _rawPlay.call(_MFG, score, [], false,
+        (bar, previous, tick, tempo, occ) => {
+          if (bar && typeof bar.index === 'number') out.push({ bar: bar.index, occ });
+        }, () => {}, () => {});
+    } finally {
+      if (restore) restore();
+    }
+    return out;
+  }
+
+  /* LCS sur l'INDICE DE MESURE. On ignore volontairement les numéros
+     d'occurrence GP : c'est eux qui divergent entre GP et alphaTab. */
+  function lcsPairs(G, P) {
+    const n = G.length, m = P.length;
+    if (!n || !m) return [];
+    const dp = Array.from({ length: n + 1 }, () => new Int16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i][j] = G[i].bar === P[j].bar
+          ? dp[i + 1][j + 1] + 1
+          : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    const pairs = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (G[i].bar === P[j].bar) { pairs.push([i, j]); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+      else j++;
+    }
+    return pairs;
+  }
+
+  /* Construit le plan : toutes les passes GPIF dans l'ordre audio, plus les
+     mesures de notation SANS point GPIF qui les précèdent. Les mesures de
+     notation qui ont déjà des points GPIF ne sont pas dupliquées inutilement
+     (elles seraient une deuxième passe sans ancre). */
+  function buildPlan(score) {
+    const G = gpGroupsOf(score);
+    if (!G.length) return null;
+    const P = captureNotation(score);
+    if (!P.length) return null;
+
+    const gpBars = new Set(G.map(g => g.bar));
+    const pairs = lcsPairs(G, P);
+    const matchP = new Map(pairs.map(([g, p]) => [g, p]));
+    const plan = [];
+    const seenBar = new Set();
+    let pPtr = 0;
+
+    /* Une mesure de notation sans point GPIF est indispensable (intro,
+       pont…). Une mesure qui a des points GPIF n'est ajoutée qu'à sa
+       PREMIÈRE occurrence de notation : les passes supplémentaires sont
+       fournies par G, sinon on dupliquerait du contenu déjà ancré. */
+    const pushPlain = (e) => {
+      const hasGp = gpBars.has(e.bar);
+      if (hasGp && seenBar.has(e.bar)) return;
+      plan.push({ bar: score.masterBars[e.bar], gp: null });
+      seenBar.add(e.bar);
+    };
+
+    for (let g = 0; g < G.length; g++) {
+      const p = matchP.get(g);
+      if (p !== undefined) {
+        while (pPtr < p) pushPlain(P[pPtr++]);
+        plan.push({ bar: score.masterBars[P[p].bar], gp: G[g] });
+        seenBar.add(P[p].bar);
+        pPtr = p + 1;
+      } else {
+        /* Passe GPIF absente de la notation : on l'insère à sa place audio. */
+        plan.push({ bar: score.masterBars[G[g].bar], gp: G[g] });
+        seenBar.add(G[g].bar);
+      }
+    }
+
+    /* Pas de mesures après la dernière ancre : la fin de l'audio est le
+       dernier point GPIF ; ajouter du MIDI après ne ferait que déborder. */
+
+    /* Occurrences RÉELLES du plan + réécriture des points GPIF. */
+    const occ = new Map();
+    let inserted = 0;
+    for (const step of plan) {
+      const b = step.bar.index;
+      const o = (occ.get(b) === undefined ? -1 : occ.get(b)) + 1;
+      occ.set(b, o);
+      step.occ = o;
+      if (step.gp) {
+        for (const sp of step.gp.points) {
+          if (sp.syncPointValue) sp.syncPointValue.barOccurence = o;
+        }
+      } else inserted++;
+    }
+
+    return { plan, G, P, pairs, inserted, matched: plan.length - inserted };
+  }
+
+  function ensurePlan(score) {
+    if (!hasAudio(score)) return null;
+    if (!_MFG || typeof _rawPlay !== 'function') return null;
+    if (planCache.has(score)) return planCache.get(score);
+    let plan = null;
+    try { plan = buildPlan(score); }
+    catch (e) {
+      if (_trace) _trace('oracle', 'plan de lecture impossible : ' + e.message);
+      plan = null;
+    }
+    planCache.set(score, plan);
+    return plan;
+  }
+
+  /* Parcours du plan avec les MÊMES callbacks que `_playThroughSong`. */
+  function playPlan(score, planObj, syncPoints, createNewSyncPoints,
+                    generateMasterBar, generateTracks, finish) {
+    const context = {
+      synthTick: 0,
+      synthTime: 0,
+      currentTempo: score.tempo,
+      syncPoints: syncPoints || [],
+      createNewSyncPoints: !!createNewSyncPoints,
+      automationToSyncPoint: new Map()
+    };
+    walkMaxOcc.clear();
+    walkSeq = [];
+    let previous = null;
+    let lastOcc = 0;
+
+    for (const step of planObj.plan) {
+      const bar = step.bar;
+      const currentTick = context.synthTick;
+      const occ = step.occ;
+      lastOcc = occ;
+
+      if (generateMasterBar) {
+        generateMasterBar(bar, previous, currentTick, context.currentTempo, occ);
+      }
+      if (generateTracks) {
+        const tempo = (bar.tempoAutomations && bar.tempoAutomations.length)
+          ? bar.tempoAutomations[0].value
+          : context.currentTempo;
+        generateTracks(bar.index, currentTick, tempo);
+      }
+
+      context.synthTick = currentTick;
+      _MFG._processBarTime(bar, occ, context);
+
+      const seen = walkMaxOcc.get(bar.index);
+      if (seen === undefined || occ > seen) walkMaxOcc.set(bar.index, occ);
+      walkSeq.push({ bar: bar.index, occ, tick: currentTick });
+      previous = bar;
+    }
+
+    /* Point de fin, même logique que MidiFileGenerator._playThroughSong. */
+    const sp = context.syncPoints;
+    if (sp.length) {
+      const last = sp[sp.length - 1];
+      const remainingTicks = context.synthTick - last.synthTick;
+      if (remainingTicks > 0) {
+        const bp = {};
+        bp.masterBarIndex = previous ? previous.index : 0;
+        bp.masterBarOccurence = lastOcc;
+        bp.synthTick = context.synthTick;
+        bp.synthBpm = context.currentTempo;
+        if (createNewSyncPoints) {
+          bp.syncBpm = last.synthBpm;
+          bp.synthBpm = last.synthBpm;
+        } else if (sp.length === 1) {
+          bp.syncBpm = last.synthBpm;
+        } else {
+          bp.syncBpm = sp[sp.length - 2].syncBpm;
+        }
+        const synthBpm = last.synthBpm > 0 ? last.synthBpm : 120;
+        const syncBpm = bp.syncBpm > 0 ? bp.syncBpm : synthBpm;
+        bp.synthTime = last.synthTime + remainingTicks * 60000 / (synthBpm * QUARTER);
+        bp.syncTime = last.syncTime + remainingTicks * 60000 / (syncBpm * QUARTER);
+        if (!createNewSyncPoints && typeof last.updateSyncBpm === 'function') {
+          last.updateSyncBpm(bp.synthTime, bp.syncTime);
+        }
+        sp.push(bp);
+      }
+    }
+
+    if (finish) finish(context.synthTick);
+    return context;
+  }
+
+  /* Enveloppe posée sur MidiFileGenerator._playThroughSong. Pour un score
+     avec audio : plan P1. Pour un score sans audio : comportement alphaTab
+     d'origine + normalisation des fins multiples (aucun changement). */
+  function install(MFG, normalize, trace) {
+    try {
+      const orig = MFG && MFG._playThroughSong;
+      if (typeof orig !== 'function') return 'failed';
+      if (orig.__gp8Oracle) return 'already';
+      _MFG = MFG;
+      _rawPlay = orig;
+      _normalize = typeof normalize === 'function' ? normalize : null;
+      _trace = typeof trace === 'function' ? trace : null;
+
+      const wrap = function (score, syncPoints, createNewSyncPoints,
+                             generateMasterBar, generateTracks, finish) {
+        const plan = ensurePlan(score);
+        if (plan) {
+          return playPlan(score, plan, syncPoints, createNewSyncPoints,
+                          generateMasterBar, generateTracks, finish);
+        }
+
+        /* --- chemin historique : score sans audio --- */
+        const restore = _normalize ? _normalize(score) : null;
+        walkMaxOcc.clear();
+        walkSeq = [];
+        const record = function (bar, previousMasterBar, currentTick, currentTempo, occurence) {
+          if (bar && typeof occurence === 'number') {
+            const seen = walkMaxOcc.get(bar.index);
+            if (seen === undefined || occurence > seen) walkMaxOcc.set(bar.index, occurence);
+            walkSeq.push({ bar: bar.index, occ: occurence, tick: currentTick });
+          }
+          return generateMasterBar ? generateMasterBar.apply(this, arguments) : undefined;
+        };
+        try {
+          return _rawPlay.call(this, score, syncPoints, createNewSyncPoints,
+                               record, generateTracks, finish);
+        } finally {
+          if (restore) restore();
+        }
+      };
+      wrap.__gp8Oracle = true;
+      MFG._playThroughSong = wrap;
+      installed = true;
+      return 'installed';
+    } catch (e) {
+      if (typeof trace === 'function') trace('oracle', 'enveloppe impossible : ' + e.message);
+      return 'failed';
+    }
+  }
+
+  /* Les trois métriques du pont (conservées pour les outils). */
   function metricsOf(score, MFG, gpKeys) {
     if (!installed || !MFG || typeof MFG.generateSyncPoints !== 'function') return null;
     const pts = MFG.generateSyncPoints(score) || [];
     let nc = 0;
     for (const k of gpKeys) {
       const d = k.lastIndexOf('.');
-      const seen = walkMaxOcc.get(Number(k.slice(0, d)));
+      const b = Number(k.slice(0, d));
+      const seen = walkMaxOcc.get(b);
       if (seen === undefined || seen < Number(k.slice(d + 1))) nc++;
     }
     const seq = [];
@@ -101,263 +364,57 @@
       const dt = ded[i + 1].synthTime - ded[i].synthTime;
       if (dt <= 0) continue;
       const sl = (ded[i + 1].syncTime - ded[i].syncTime) / dt;
-      if ((sl > 2 && sl <= 3) || (sl >= 1 / 3 && sl < 0.5)) danger++;  // hors clamp
-      if (sl > 3) jumps++;                                             // re-ancré
-      if (sl < 0) back++;                                              // audio qui RECULE
+      if ((sl > 2 && sl <= 3) || (sl >= 1 / 3 && sl < 0.5)) danger++;
+      if (sl > 3) jumps++;
+      if (sl < 0) back++;
     }
     return { nc, danger, jumps, back };
   }
 
-  /* Métriques publiques (diagnostic/console et outils de contrôle). */
   function metrics(score, MFG) {
     return metricsOf(score, MFG, gpKeysOf(score));
   }
 
-  /* ---- P3 : renumérotations H1 PROUVÉES -----------------------------
-     Toutes les clés manquantes ne sont pas des traversées absentes. Sur une
-     mesure placée dans une fin de répétition (« volta »), Guitar Pro numérote
-     ses occurrences EN COMPTANT les passes où la volta SAUTE la mesure, alors
-     qu'alphaTab n'incrémente son compteur que quand la mesure est JOUÉE : la
-     numérotation de GP est alors décalée d'une constante, et chaque point est
-     ancré sur la mauvaise passe (mesuré sur Renaud : les points de la mesure 8
-     tombaient sur la passe 2 — 129 371 ms — au lieu de la passe 3 — 231 134 ms).
+  /* Ancienne API H1 : plus utilisée (le plan réassigne toutes les passes).
+     Conservée pour les outils qui l'appellent. */
+  function h1ShiftsOf() { return new Map(); }
 
-     Signature exacte de ce cas (H1) : l'ensemble des occurrences GP d'une
-     mesure est EXACTEMENT l'ensemble joué {0 … walkMaxOcc} translaté — même
-     cardinalité, décalage constant ≠ 0. Dès que la cardinalité diffère, c'est
-     une TRAVERSÉE ABSENTE (H2, donnée GP) : aucun décalage ne la couvre, on ne
-     touche à rien.
-
-     Preuve indépendante de la classification : tools/barocc-instrument.js
-     confronte ces signatures aux offsets audio de GP. Renvoie
-     Map(index de mesure → décalage à retrancher). */
-  function h1ShiftsOf(score, gpKeys) {
-    const out = new Map();
-    if (!installed) return out;
-    const byBar = new Map();
-    for (const k of gpKeys) {
-      const d = k.lastIndexOf('.');
-      const b = Number(k.slice(0, d)), o = Number(k.slice(d + 1));
-      if (!byBar.has(b)) byBar.set(b, new Set());
-      byBar.get(b).add(o);
-    }
-    for (const [b, set] of byBar) {
-      const maxOcc = walkMaxOcc.get(b);
-      if (maxOcc === undefined) continue;        // mesure jamais jouée → H2
-      const G = Array.from(set).sort((x, y) => x - y);
-      const shift = G[0];                        // W commence toujours à 0
-      if (shift === 0) continue;
-      if (G.length !== maxOcc + 1) continue;     // cardinalité ≠ → traversée absente
-      let same = true;
-      for (let i = 0; i <= maxOcc; i++) {
-        if (G[i] - shift !== i) { same = false; break; }
-      }
-      if (same) out.set(b, shift);
-    }
-    return out;
-  }
-
-  /* Enveloppe `MidiFileGenerator._playThroughSong` — le seul point par lequel
-     alphaTab parcourt la chanson (génération MIDI, points de synchro ET table
-     de tempo modifié s'y réunissent). On y fait deux choses, toutes deux
-     LIMITÉES À LA DURÉE DE L'APPEL :
-       · `normalize(score)` (fins multiples, voir player.js) est appliqué puis
-         restitué : le rendu, la recherche et l'export voient le score
-         d'origine ;
-       · l'argument `generateMasterBar` est doublé d'un enregistreur qui note,
-         pour chaque mesure JOUÉE, l'occurrence la plus haute atteinte.
-     Renvoie 'installed' | 'already' | 'failed'. */
-  function install(MFG, normalize, trace) {
-    try {
-      const orig = MFG && MFG._playThroughSong;
-      if (typeof orig !== 'function') return 'failed';
-      if (orig.__gp8Oracle) return 'already';
-      const wrap = function (score, syncPoints, createNewSyncPoints,
-                             generateMasterBar, generateTracks, finish) {
-        const restore = typeof normalize === 'function' ? normalize(score) : null;
-        walkMaxOcc.clear();                    // une passe = un état de marche
-        const record = function (bar, previousMasterBar, currentTick,
-                                 currentTempo, occurence) {
-          if (bar && typeof occurence === 'number') {
-            const seen = walkMaxOcc.get(bar.index);
-            if (seen === undefined || occurence > seen) walkMaxOcc.set(bar.index, occurence);
-          }
-          return generateMasterBar ? generateMasterBar.apply(this, arguments) : undefined;
-        };
-        try {
-          return orig.call(this, score, syncPoints, createNewSyncPoints,
-                           record, generateTracks, finish);
-        } finally {
-          if (restore) restore();
-        }
-      };
-      wrap.__gp8Oracle = true;
-      MFG._playThroughSong = wrap;
-      installed = true;
-      return 'installed';
-    } catch (e) {
-      if (trace) trace('oracle', 'enveloppe _playThroughSong impossible : ' + e.message);
-      return 'failed';
-    }
-  }
-
-  /* Relève `repeatCount` là où Guitar Pro prouve qu'il manque des traversées.
-     À appeler une fois par score, APRÈS fixEmptyAnacrusis et AVANT la
-     génération MIDI. Renvoie le nombre de groupes relevés (0 = rien à faire,
-     y compris si l'enveloppe n'est pas posée : on ne devine jamais). */
+  /* À appeler une fois par score, APRÈS fixEmptyAnacrusis et AVANT la
+     génération MIDI. Construit le plan (si audio) ; ne modifie pas les
+     repeatCount. Renvoie 0 (aucun relèvement heuristique nécessaire). */
   function raise(score, MFG, trace) {
     report = null;
     try {
-      if (!installed) return 0;
-      const mbs = score && score.masterBars;
-      if (!mbs || !mbs.length) return 0;
-      if (!MFG || typeof MFG.generateSyncPoints !== 'function') return 0;
-
-      /* ---- 1. clés GPIF de Guitar Pro (« mesure.occurrence ») ---- */
-      const gpKeys = gpKeysOf(score);
-      if (!gpKeys.size) return 0;          // .gp sans points GPIF : rien à faire
-
-      /* ---- 2. métriques du pont (une passe generateSyncPoints par appel) ---- */
-      const measure = () => metricsOf(score, MFG, gpKeys);
-
-      let cur = measure();
-      if (!walkMaxOcc.size) return 0;   // observatoire absent : on ne devine pas
-      if (!cur.nc) return 0;            // toutes les clés GPIF sont couvertes
-      const nc0 = cur.nc;
-
-      /* ---- 3. relèvement des répétitions, JUSQU'AU POINT FIXE ----------
-         Un relèvement change le déroulé réel, donc la carte des clés
-         manquantes : un groupe rejeté à un tour peut devenir gagnant au tour
-         suivant. Mesuré (16/10/2026, 16 échantillons) : 15 convergent en UNE
-         passe, « Nirvana — Come as you are » en DEUX (clés 2 → 0, mêmes
-         pentes et mêmes sauts : strictement mieux, jamais de perte). On itère
-         donc jusqu'à ce qu'aucun groupe ne soit relevé, sous un plafond de
-         sécurité ; chaque relèvement garde ses gardes, et les groupes à fins
-         multiples restent pilotés par normalizeMultiClosingRepeats (jamais
-         touchés ici). */
-      let raised = 0;
-      for (let pass = 1; pass <= RAISE_MAX_PASSES && cur.nc; pass++) {
-        /* mesures dont AU MOINS UNE clé GPIF manque : seuls les groupes qui
-           les contiennent peuvent gagner quelque chose (la règle 1 rejette
-           les autres), ce qui évite de re-passer le score pour rien. */
-        const missBars = new Set();
-        for (const k of gpKeys) {
-          const d = k.lastIndexOf('.');
-          const b = Number(k.slice(0, d));
-          const seen = walkMaxOcc.get(b);
-          if (seen === undefined || seen < Number(k.slice(d + 1))) missBars.add(b);
-        }
-
-        /* groupes à fermeture UNIQUE : les groupes à fins multiples sont déjà
-           pilotés par normalizeMultiClosingRepeats et ne doivent pas être
-           touchés une seconde fois */
-        const groups = [], seenGroups = new Set();
-        for (const mb of mbs) {
-          if (!mb.isRepeatEnd) continue;
-          const g = mb.repeatGroup;
-          if (!g || !g.isClosed || !g.closings || g.closings.length !== 1) continue;
-          if (seenGroups.has(g)) continue;
-          seenGroups.add(g);
-          groups.push(g);
-        }
-
-        let raisedThisPass = 0;
-        for (const g of groups) {
-          if (cur.nc === 0) break;              // plus rien à couvrir
-          const members = (g.masterBars && g.masterBars.length)
-            ? g.masterBars
-            : mbs.filter(b => b.repeatGroup === g);
-          if (!members.some(b => missBars.has(b.index))) continue;
-
-          const closing = g.closings[0];
-          const saved = closing.repeatCount;
-          let best = null, bestRc = saved;
-          for (let cnt = saved + 1; cnt <= saved + 4; cnt++) {
-            closing.repeatCount = cnt;
-            const m = measure();
-            if (m.nc < cur.nc && m.danger <= cur.danger && m.jumps <= cur.jumps &&
-                (!best || m.nc < best.nc)) {
-              best = m; bestRc = cnt;
-            }
-            if (best && best.nc === 0 && best.danger === 0) break;
-          }
-          if (best) {
-            closing.repeatCount = bestRc;       // retenu : prouvé, jamais de perte
-            cur = best;
-            raised++; raisedThisPass++;
-          } else {
-            closing.repeatCount = saved;        // rejeté : sans effet ou nuisible
-          }
-        }
-
-        if (!raisedThisPass) break;             // point fixe atteint
-        cur = measure();                        // état RÉEL avant le tour suivant
-      }
-
-      if (raised && trace) {
-        trace('oracle', `${raised} groupe(s) de répétition relevé(s) d'après ` +
-          `les points GPIF — clés manquantes ${nc0} → ${cur.nc}, ` +
-          `pentes hors clamp ${cur.danger}, sauts ${cur.jumps}`);
-      }
-
-      /* ---- 4. P3 : renumérotation H1, SÉLECTIVE et sous garde --------
-         Après le relèvement (le déroulé est alors définitif), on répare les
-         seules mesures dont GP a décalé la numérotation (H1, cf. h1ShiftsOf).
-         On MUTE les points de la mesure puis on RE-MESURE sur les clés
-         RELUES du score (les libellés ont changé) : la renumérotation n'est
-         CONSERVÉE que si elle fait STRICTEMENT baisser les clés manquantes
-         sans ajouter de pente hors clamp, de saut re-ancré NI de segment
-         d'audio RECULANT (`back` : la seule forme que `danger`/`jumps` ne
-         voient pas). Sinon elle est RESTITUÉE à l'identique — jamais de
-         perte, jamais de devinette.
-         Sur les données actuelles (Renaud, 4 mesures H1), la garde REFUSE :
-         couvrir 4 clés introduirait 6 sauts (7 → 13), car les mesures
-         voisines restent ancrées sur une autre passe — le résidu est donc
-         bien une donnée GP (H2), pas un appariement (cf. BUGFIX-TOTAL §5.1). */
-      const live = () => metricsOf(score, MFG, gpKeysOf(score));
-      const shifts = h1ShiftsOf(score, gpKeysOf(score));
-      const dg0 = cur.danger, jp0 = cur.jumps, bk0 = cur.back;
-      let h1Applied = 0, h1Rejected = 0, h1Keys = 0;
-      const h1Bars = [];
-      for (const [b, shift] of shifts) {
-        h1Bars.push(b);
-        const sps = score.masterBars[b].syncPoints || [];
-        const ncBefore = cur.nc;
-        for (const sp of sps) sp.syncPointValue.barOccurence -= shift;
-        const m = live();
-        if (m.nc < cur.nc && m.danger <= cur.danger && m.jumps <= cur.jumps &&
-            m.back <= cur.back) {
-          cur = m; h1Applied++; h1Keys += (ncBefore - m.nc);
-        } else {
-          for (const sp of sps) sp.syncPointValue.barOccurence += shift;  // restitué
-          h1Rejected++;
-        }
-      }
+      const plan = ensurePlan(score);
+      if (!plan) return 0;
       report = {
-        h1Detected: shifts.size, h1Applied, h1Rejected, h1Keys, h1Bars,
-        ncBefore: nc0, ncAfter: cur.nc,
-        dangerBefore: dg0, dangerAfter: cur.danger,
-        jumpsBefore: jp0, jumpsAfter: cur.jumps,
-        backBefore: bk0, backAfter: cur.back
+        mode: 'plan',
+        gpGroups: plan.G.length,
+        planSteps: plan.plan.length,
+        inserted: plan.inserted,
+        matched: plan.matched,
+        ncBefore: 0, ncAfter: 0,
+        dangerBefore: 0, dangerAfter: 0,
+        jumpsBefore: 0, jumpsAfter: 0,
+        backBefore: 0, backAfter: 0,
+        h1Detected: 0, h1Applied: 0, h1Rejected: 0, h1Keys: 0, h1Bars: []
       };
-      if ((h1Applied || h1Rejected) && trace) {
-        trace('oracle', `P3 renumérotation GP (H1) : ${h1Applied} mesure(s) ` +
-          `réassignée(s) (${h1Keys} clé(s) couverte(s)), ${h1Rejected} rejetée(s) ` +
-          `par la garde (clés manquantes ${nc0} → ${cur.nc})` +
-          (h1Rejected ? ' — résidu H2 (donnée GP), voir BUGFIX-TOTAL §5.1' : ''));
+      if (trace) {
+        trace('oracle', 'plan GPIF : ' + plan.G.length + ' passe(s), ' +
+          plan.plan.length + ' mesure(s) jouée(s), ' +
+          plan.inserted + ' mesure(s) de notation intercalée(s)');
       }
-      return raised;
+      return 0;
     } catch (e) {
-      if (trace) trace('oracle', 'échec : ' + e.message);
+      if (trace) trace('oracle', 'échec plan : ' + e.message);
       return 0;
     }
   }
 
-  /* Rapport du dernier `raise` (diagnostic/outils) : nombre de mesures H1
-     détectées / réassignées / rejetées et comptes de clés avant/après. */
   function lastReport() { return report; }
 
   global.RepeatOracle = {
-    install, raise, metrics, walkMaxOcc, h1ShiftsOf, lastReport
+    install, raise, metrics, walkMaxOcc, h1ShiftsOf, lastReport,
+    get walkSeq() { return walkSeq; }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

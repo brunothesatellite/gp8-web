@@ -6,7 +6,10 @@
   "scripts": {
     "test": "node run.js",
     "test:all": "node run.js --all",
-    "test:headed": "node run.js --headed"
+    "test:headed": "node run.js --headed",
+    "test:p0": "node p0-check.js",
+    "test:p1": "node p1-check.js",
+    "test:p2": "node p2-check.js"
   },
   "devDependencies": {
     "playwright-core": "^1.55.0"

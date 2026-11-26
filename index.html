@@ -42,8 +42,8 @@
 
 <body class="h-[100dvh] flex flex-col overflow-hidden bg-slate-950 text-slate-200 antialiased selection:bg-sky-500/30">
 
-  <!-- Balise <audio> HTML5 INVISIBLE (exigence : synchro externe) -->
-  <audio id="externalAudio" preload="auto" hidden></audio>
+  <!-- P2 : la piste audio est décodée en AudioBuffer et jouée dans l'AudioContext
+       du synthé (js/audio-sync.js) ; plus de balise <audio> maître. -->
 
   <!-- =========================================================
        ZONE DE DÉPÔT (overlay plein écran)

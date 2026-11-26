@@ -183,7 +183,7 @@ function syncShortViewport() {
 
       // ★ ligne « Audio Track » : la piste audio embarquée joue EN PARALLÈLE
       //   du synthé (MixSync la tient calée) — elle a donc son propre M/S.
-      //   Max 100 : HTMLMediaElement.volume est borné à [0;1] par le spec.
+      //   Max 100 : le GainNode de la piste audio est borné à [0;1].
       if (score.backingTrack && score.backingTrack.rawAudioFile) {
         list.appendChild(mixerRow('audio', {
           color: '#f59e0b',
@@ -397,6 +397,11 @@ function syncShortViewport() {
     }
 
     function barIndexAt(tick) {
+      /* `tick` vient d'une plage alphaTab : c'est un tick PERFORMANCE. On
+         utilise tickCache.masterBars (occurrences jouées), pas les starts
+         partition — sinon les listes A/B affichent une autre mesure. */
+      const perf = Player.perfBarIndexAt(tick);
+      if (perf != null) return perf;
       const bars = Player.S.score ? Player.S.score.masterBars : [];
       if (!(tick >= 0)) return 0;
       for (let i = bars.length - 1; i >= 0; i--) if (bars[i].start <= tick) return i;

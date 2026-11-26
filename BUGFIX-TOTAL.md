@@ -11,6 +11,38 @@
 >
 > **Nature** : les correctifs **P0 → P6 sont livrés et vérifiés**. Il ne reste que
 > des étapes **humaines** : l'**écoute** (§5.2) et la **validation mobile** (§7).
+>
+> ---
+>
+> **⚠ Mise à jour du 2026-11-26 — l'analyse du sample `Mr. Moustache` a
+> rouvert trois causes critiques non couvertes par les harnais.** Les invariants
+> ci-dessous restent vrais (0 écriture `playbackSpeed`, tempo pré-cuit), mais
+> ils ne suffisent pas : les seeks/boucles visaient le **tick partition** au lieu
+> du **tick performance**, 90 clés GPIF n'étaient pas couvertes sur 17 fichiers,
+> et l'horloge `<audio>` reste indépendante de l'AudioWorklet. Voir
+> **`ANALYSE-AUDIO-SYNC-2026-11-26.md`** (constats mesurés + plan P0-P4) et
+> `tools/sync-coherence.js` (`--strict` passe depuis P1).
+> Le présent document reste la référence des correctifs **déjà livrés**.
+>
+> **P0 appliqué** : traduction partition→performance (`perfStartOfBar`),
+> `isSeek` immédiat, pré-cuit exact (axe 0 ms), queue d'outro traitée comme
+> tempo, plage de pentes élargie.
+>
+> **P1 appliqué (2026-11-26)** : `RepeatOracle` construit un **plan de lecture
+> GPIF** (toutes les passes GPIF dans l'ordre audio, LCS sur les mesures,
+> occurrences réécrites, parcours direct du générateur). `sync-coherence` :
+> **0 clé manquante, 0 axe, 0 pente hors plage, 0 tail sur 17/17** ;
+> `--strict` passe.
+>
+> **P2 appliqué (2026-11-26)** : `js/audio-sync.js` décode la piste en
+> `AudioBuffer` et la joue dans l'**AudioContext du synthé**
+> (`AudioBufferSourceNode`). Navigateur : **17/17 cible stricte**, dérive
+> **2-8 ms**, 0 écriture `playbackRate` en régime établi.
+>
+> **P2b appliqué** : à vitesse utilisateur ≠ 1, bascule sur un `<audio>`
+> `preservesPitch` routé dans le même AudioContext via
+> `MediaElementAudioSourceNode` : time-stretch sans transposition (×0,5/×1,5
+> vérifiés, dérive < 25 ms).
 
 Projet : lecteur Guitar Pro **GP8-Web** — alphaTab 1.8.4 vendorisé + piste MP3
 embarquée dans le `.gp`/`.gpx`, avec synchronisation MIDI ↔ MP3.
@@ -231,6 +263,11 @@ Chaque impasse a été **tranchée par la mesure**, pas par préférence.
 ## 5. Ce qui reste à faire
 
 ### 5.1 Résidu accepté : H2 (donnée GP)
+
+> **P1 (2026-11-26)** : cette section est **historique**. Le plan de lecture
+> GPIF couvre désormais toutes les passes (0 clé manquante sur 17/17) ; les
+> mesures « H2 » sont jouées ou intercalées par le plan, plus laissées
+> manquantes. Voir `ANALYSE-AUDIO-SYNC-2026-11-26.md` §5.1.
 
 Après P3, il reste des clés de synchro qu'**aucun** appariement ne peut couvrir
 — **70 clés** au total, **100 % classées** :
@@ -493,9 +530,13 @@ Aucun bug **CRITICAL / MAJOR / MINOR** ouvert.
 | `tempo-prebake-spike` | pré-cuisson livrée : fidélité par segment | < 0,5 % |
 | `mix-sync-harness` | **contrôleur réel** : `tempoWrites`, dérive | 0 / ≤ 11 ms |
 | `duration-check` | anacrouse ↔ portée audio GPIF, fin ≤ MP3 | ≤ 0,04 % |
+| `sync-coherence` | **audit P0/P1** : clés GPIF, axe pré-cuit, sauts, outres, ticks partition↔performance | `--strict` : 0 clé / 0 axe / 0 tail |
+| `browser/p0-check` | **P0 navigateur** : seek M.27 et boucle M.12-13 en ticks performance | 0 échec |
+| `browser/p1-check` | **P1 navigateur** : plan GPIF + seeks tardifs AC/DC / Moustache / Renaud | 0 échec |
+| `browser/p2-check` | **P2 navigateur** : AudioBufferSource, dérive, 0 rate/seek, vitesse | 0 échec |
 
 ```bash
-node tools/test-all.js                  # les 8 harnais (~70 s) → RESULTAT : OK
+node tools/test-all.js                  # les 9 harnais (~75 s) → RESULTAT : OK
 gen-samples.bat                         # régénère samples/list.json
 powershell -File deploy/_build.ps1      # reconstruit deploy/gp8-web/
 

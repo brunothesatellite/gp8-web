@@ -26,7 +26,6 @@
       loopRange: null,       // plage A→B en cours (modèle local = vérité)
       currentBar: 0,
       externalReady: false,
-      externalBlobUrl: null,
       mix: null,           // modèle du mélangeur (source de vérité)
       perf: null           // chronomètre de chargement (journal console)
     };
@@ -316,7 +315,7 @@
       /* --- position / progression + calage de l'audio (mode Mix) --- */
       api.playerPositionChanged.on(e => safe(() => {
         App.updatePosition(e);
-        MixSync.onPosition();
+        MixSync.onPosition(e);       // e.isSeek = seek/loop immédiat
       })());
 
       /* --- mesure courante --- */
@@ -401,7 +400,7 @@
     /* alphaTab.stop() pose DÉJÀ le curseur sur `playbackRange.startTick ?? 0`
        (AlphaSynth.stop, l.39999) : forcer `tickPosition = 0` envoyait un
        tick HORS plage A→B. */
-    const stop      = () => { if (S.api) { S.api.stop(); MixSync.resync(); } };
+    const stop      = () => { if (S.api) S.api.stop(); };
 
     /* -------- Positionnement sûr --------
        alphaTab BORNE la position interne dans la plage A→B (`mainSeek`,
@@ -420,6 +419,44 @@
        On borne donc TOUTES nos écrits exactement comme `mainSeek`, pour que
        son clamp devienne neutre (aucune écriture hors plage => invariant
        réel/musical jamais cassé). */
+    /* -------- Correspondance tick partition ↔ tick performance --------
+       `masterBar.start` est un tick de PARTITION ; `api.tickPosition` et
+       `playbackRange` sont des ticks de PERFORMANCE (reprises/renvois
+       inclus). Les confondre décale tout seek/boucle dès qu'une mesure est
+       répétée : M.27 de Mr. Moustache partait à 0:36 au lieu de 1:18.
+       `tickCache.masterBars` donne la première occurrence jouée de chaque
+       mesure, avec son `start`/`end` performance. */
+    function perfEntryOfBar(idx) {
+      const tc = S.api && S.api.tickCache;
+      const entries = tc && tc.masterBars;
+      if (!entries || !entries.length) return null;
+      for (const e of entries) {
+        if (e && e.masterBar && e.masterBar.index === idx) return e;
+      }
+      return null;
+    }
+    function perfStartOfBar(idx) {
+      const e = perfEntryOfBar(idx);
+      return e ? e.start : null;
+    }
+    function perfEndOfBar(idx) {
+      const e = perfEntryOfBar(idx);
+      return e ? e.end : null;
+    }
+    /* tick performance → index de mesure affiché (boucle A/B, progression) */
+    function perfBarIndexAt(tick) {
+      const tc = S.api && S.api.tickCache;
+      const entries = tc && tc.masterBars;
+      if (!entries || !entries.length || !isFinite(tick)) return null;
+      if (tick < entries[0].start) return entries[0].masterBar.index;
+      let lo = 0, hi = entries.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (entries[mid].start <= tick) lo = mid; else hi = mid - 1;
+      }
+      return entries[lo].masterBar.index;
+    }
+
     function seekTick(tick) {
       if (!S.api || !isFinite(tick)) return;
       const r = S.api.playbackRange;
@@ -435,19 +472,43 @@
       const to    = range ? range.endTick   : S.api.endTick;
       if (to <= from) return;
       seekTick(from + (to - from) * clamp(r, 0, 1));
-      MixSync.resync();
+      /* Pas de MixSync.resync() ici : le setter tickPosition ne recalcule pas
+         encore timePosition. C'est playerPositionChanged(isSeek) qui recale
+         l'audio, avec la position réellement calculée par le worker. */
     }
 
     function gotoBar(delta) {
-      if (!S.score) return;
+      if (!S.score || !S.api) return;
       const count = S.score.masterBars.length;
-      const next  = clamp(S.currentBar + delta, 0, count - 1);
+      let next  = clamp(S.currentBar + delta, 0, count - 1);
+      let start = perfStartOfBar(next);
+
+      /* Mesure jamais jouée (ex. M.32 de Mr. Moustache, masquée par une
+         volta) : chercher la première mesure jouée dans le sens du geste,
+         puis dans l'autre sens. On ne seeke jamais un tick performance 0
+         par accident. */
+      if (start == null) {
+        const dir = delta < 0 ? -1 : 1;
+        let scan = next + dir;
+        while (scan >= 0 && scan < count && perfStartOfBar(scan) == null) scan += dir;
+        if (scan < 0 || scan >= count) {
+          scan = next - dir;
+          while (scan >= 0 && scan < count && perfStartOfBar(scan) == null) scan -= dir;
+        }
+        if (scan < 0 || scan >= count) {
+          App.toast('Aucune mesure jouable dans cette direction.', 'info');
+          return;
+        }
+        next = scan;
+        start = perfStartOfBar(next);
+      }
+
       // borné par la plage A→B quand une boucle est armée : alphaTab ferait
       // le clamp de son côté et le curseur affiché partirait ailleurs
-      seekTick(S.score.masterBars[next].start);
+      seekTick(start);
       S.currentBar = next;
       $('#barLabel').textContent = `M. ${next + 1}/${count}`;
-      MixSync.resync();
+      /* idem seekRatio : pas de resync sur un timePosition périmé. */
     }
 
     /* -------- Métronome --------
@@ -951,10 +1012,7 @@
     async function prepareExternalAudio(quiet) {
       const blob = await getEmbeddedBlob(quiet);
       if (!blob) { AudioSync.setSource(null); return false; }
-      if (S.externalBlobUrl) URL.revokeObjectURL(S.externalBlobUrl);
-      S.externalBlobUrl = URL.createObjectURL(blob);
-      AudioSync.setSource(S.externalBlobUrl);
-      return true;
+      return await AudioSync.setSource(blob);
     }
     /* Mode Mix : on branche l'audio dès qu'un score est chargé. */
     function ensureMixAudio() {
@@ -982,11 +1040,22 @@
       if (!S.score || !S.api || startIdx < 0 || endIdx < 0) return;
       const bars = S.score.masterBars;
       const a = Math.min(startIdx, endIdx), b = Math.max(startIdx, endIdx);
+      const ea = perfEntryOfBar(a), eb = perfEntryOfBar(b);
+      if (!ea || !eb) {
+        const bad = !ea ? a : b;
+        App.toast(`Mesure ${bad + 1} jamais jouée (masquée par une reprise) : boucle impossible.`, 'info');
+        return;
+      }
       const range = new (AT.PlaybackRange || Object)();
-      range.startTick = bars[a].start;
-      range.endTick   = (b + 1 < bars.length) ? bars[b + 1].start : S.api.endTick;
+      /* Ticks PERFORMANCE : première occurrence jouée de a → fin de la
+         première occurrence de b. Utiliser bars[a].start (partition) faisait
+         boucler un autre passage dès qu'une reprise précédait la zone. */
+      range.startTick = ea.start;
+      range.endTick   = eb.end > ea.start ? eb.end : S.api.endTick;
       S.api.playbackRange = range;   // → playbackRangeChanged (asynchrone)
       setLoopOn(true);               // B2 : l'icône L s'allume tout de suite
+      S.currentBar = a;
+      $('#barLabel').textContent = `M. ${a + 1}/${bars.length}`;
       App.toast(`Boucle mesures ${a + 1} → ${b + 1}`, 'info');
     }
 
@@ -1041,6 +1110,7 @@
       showTrack, toggleDisplay, isDisplayed, toggleTrackMute, toggleTrackSolo, setTrackVolume,
       toggleAudioMute, toggleAudioSolo, resetMix, applyMix,
       toggleLoop, setLoopOn, setLoopRange, clearLoopRange,
+      perfBarIndexAt, perfStartOfBar, perfEndOfBar,
       setLayout, setScrollMode, setSpeed, applyVolumes, isSynthMode,
       flushPerf
     };

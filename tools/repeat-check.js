@@ -11,15 +11,12 @@
    Vérifie :
      A. tout échantillon porte bien un audio embarqué AU MOMENT de
         scoreLoaded (sinon la condition de player.js neutraliserait le
-        correctif en silence) ;
-     B. AUCUNE des trois métriques ne se dégrade (clés GPIF manquantes,
-        pentes hors clamp [0,5 ; 2], sauts re-ancrés) ;
-     C. les gains attendus sont retrouvés (reference, valeurs en CLÉS
-        GPIF UNIQUES — un même couple mesure/occurrence peut porter
-        plusieurs points, ils ne comptent qu'une fois) ;
+        plan GPIF en silence) ;
+     B. le plan GPIF couvre TOUTES les clés (clés manquantes = 0) ;
+     C. `raise` ne modifie pas le déroulé (le plan est la seule source) ;
      D. `raise` est idempotent (un second appel ne lève rien).
 
-   Usage :  node tools/repeat-check.js     (14 échantillons, ~10 s)
+   Usage :  node tools/repeat-check.js     (17 échantillons)
    Sortie : 0 = conforme, 1 = anomalie (testable en CI).
    ================================================================== */
 
@@ -72,20 +69,13 @@ function load(f) {
 }
 const fmt = m => m ? `${m.nc} / ${m.danger} / ${m.jumps}` : '(null)';
 
-/* Gains attendus, en clés uniques (avant → après). Fichier absent de cette
-   table : seule la non-régression (B) est exigée de lui. */
-const REF = {
-  'ACDC':          { before: [16, 2, 4], after: [12, 2, 3] },
-  'Blink':         { before: [7,  0, 3], after: [0,  0, 2] },
-  'Slayer':        { before: [8,  1, 0], after: [0,  0, 0] },
-  'The Offspring': { before: [8,  0, 2], after: [5,  0, 1] }
-};
-
+/* P1 : le plan GPIF doit couvrir TOUTES les clés. Plus de référence
+   « avant/après » : le critère est a.nc === 0 pour chaque fichier. */
 const files = fs.readdirSync(SAMPLES).filter(f => /\.gp$/i.test(f)).sort();
-console.log('fichier'.padEnd(38) + '| audio | AVANT (manq/clamp/saut) | APRÈS                     | levés');
+console.log('fichier'.padEnd(38) + '| audio | APRÈS (manq/clamp/saut) | levés | verdict');
 console.log('-'.repeat(110));
 
-let bad = 0, sansAudio = 0, avant = 0, apres = 0;
+let bad = 0, sansAudio = 0, apres = 0;
 for (const f of files) {
   const label = f.replace(/\.gp$/i, '').slice(0, 36);
   try {
@@ -95,41 +85,32 @@ for (const f of files) {
     const audio = !!(score.backingTrack && score.backingTrack.rawAudioFile);
     if (!audio) sansAudio++;
 
-    const b = RO.metrics(score, MFG);
     const n = RO.raise(score, MFG, null);
     const a = RO.metrics(score, MFG);
-    avant += b.nc; apres += a.nc;
+    apres += a.nc;
 
-    /* B. aucune régression */
-    if (!(a.nc <= b.nc && a.danger <= b.danger && a.jumps <= b.jumps)) {
-      console.log('      ✗ RÉGRESSION ' + label); bad++;
+    if (a.nc !== 0) {
+      console.log('      ✗ CLÉS MANQUANTES ' + label + ' : ' + a.nc); bad++;
+    }
+    if (n !== 0) {
+      console.log('      ✗ raise() a modifié le déroulé : ' + label); bad++;
     }
     /* D. idempotence */
     if (RO.raise(score, MFG, null) !== 0) {
-      console.log('      ✗ second raise a relevé des groupes : ' + label); bad++;
-    }
-    /* C. gains de référence */
-    let note = '';
-    for (const k of Object.keys(REF)) {
-      if (label.indexOf(k) !== 0) continue;
-      const r = REF[k];
-      const okB = [b.nc, b.danger, b.jumps].every((v, i) => v === r.before[i]);
-      const okA = [a.nc, a.danger, a.jumps].every((v, i) => v === r.after[i]);
-      note = okB && okA ? '  ref=ok' : '  ref≠ (' + (okB ? '' : 'avant ' + r.before.join('/') + ' ') +
-                                      (okA ? '' : 'après ' + r.after.join('/')) + ')';
-      if (!okB || !okA) bad++;
+      console.log('      ✗ second raise a modifié le déroulé : ' + label); bad++;
     }
     console.log(label.padEnd(38) + '| ' + (audio ? ' oui ' : ' NON ') + ' | ' +
-      fmt(b).padEnd(23) + '| ' + fmt(a).padEnd(25) + '| ' + String(n).padStart(4) + note);
+      fmt(a).padEnd(25) + '| ' + String(n).padStart(4) + ' | ' +
+      (a.nc === 0 ? 'OK' : 'KO'));
   } catch (e) {
     bad++;
     console.error('ECHEC ' + f + ' : ' + (e.stack || e.message).split('\n').slice(0, 3).join(' | '));
   }
 }
 console.log('-'.repeat(110));
-console.log('clés GPIF manquantes : AVANT ' + avant + ' → APRÈS ' + apres);
+console.log('clés GPIF manquantes : APRÈS ' + apres);
 console.log('audio embarqué a scoreLoaded : ' + (files.length - sansAudio) + '/' + files.length);
 console.log(bad === 0
-  ? 'RESULTAT : OK — aucune régression, gains conformes a la reference'
+  ? 'RESULTAT : OK — plan GPIF, 0 clé manquante, idempotent'
   : 'RESULTAT : ' + bad + ' ANOMALIE(S)');
 process.exit(bad === 0 ? 0 : 1);

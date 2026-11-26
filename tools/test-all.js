@@ -25,13 +25,14 @@ const VERBOSE = process.argv.includes('--verbose');
    chaque .gp deux fois : génération + pont livré). */
 const SUITE = [
   ['load-smoke',          "ordre des <script>, bindings, App.boot / Samples.build"],
-  ['repeat-check',        "renvois : clés GPIF manquantes, non-régression de l'oracle"],
+  ['repeat-check',        "plan GPIF : 0 clé manquante, idempotent"],
   ['barocc-instrument',   "RC-1 (P3) : clés manquantes classées H1/H2, sous référence"],
-  ['tempo-correct-sim',   "loi « protège » sur playbackRate (modèle PRÉ-P2, référence)"],
+  ['tempo-correct-sim',   "modèle PRÉ-P2 (informatif, non bloquant)"],
   ['sync-audit',          "chemin livré : recadrages / glitchs / sauts par fichier"],
   ['tempo-prebake-spike', "pré-cuisson livrée : fidélité par segment < 0,5 %"],
   ['mix-sync-harness',    "contrôleur RÉEL : tempoWrites = 0, dérive < 40 ms"],
-  ['duration-check',      "P4 : anacrouse ↔ portée audio GPIF, fin de webapp ≤ MP3"]
+  ['duration-check',      "P4 : anacrouse ↔ portée audio GPIF, fin de webapp ≤ MP3"],
+  ['sync-coherence',      "P1 : 0 clé GPIF, 0 axe pré-cuit, 0 tail", ['--strict']]
 ];
 
 if (!fs.existsSync(path.join(__dirname, 'vendor', 'alphaTab.js'))) {
@@ -42,7 +43,7 @@ if (!fs.existsSync(path.join(__dirname, 'vendor', 'alphaTab.js'))) {
 const rows = [];
 let bad = 0;
 
-for (const [name, what] of SUITE) {
+for (const [name, what, extraArgs] of SUITE) {
   const file = path.join(__dirname, name + '.js');
   if (!fs.existsSync(file)) {
     rows.push({ name, what, ok: false, ms: 0, out: 'fichier absent : ' + file });
@@ -50,7 +51,7 @@ for (const [name, what] of SUITE) {
     continue;
   }
   const t0 = Date.now();
-  const r  = spawnSync(process.execPath, [file], {
+  const r  = spawnSync(process.execPath, [file].concat(extraArgs || []), {
     cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024
   });
   const ms  = Date.now() - t0;

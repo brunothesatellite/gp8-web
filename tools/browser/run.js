@@ -174,21 +174,21 @@ async function runCase(ctx, base, file, pick) {
     await page.waitForFunction(() => typeof Player !== 'undefined' && Player.S.score && Player.S.score.masterBars.length > 0,
       null, { timeout: 60000 });
     await page.waitForFunction(() => {
-      const a = document.getElementById('externalAudio');
+      const a = AudioSync.element;
       return a && a.src && MixSync._probe().n > 0;
     }, null, { timeout: 60000 });
 
     r.bars       = await page.evaluate(() => Player.S.score.masterBars.length);
     r.tracks     = await page.evaluate(() => Player.S.score.tracks.length);
     r.syncPoints = await page.evaluate(() => MixSync._probe().n);
-    /* métadonnées de la piste audio : chargées en asynchrone (blob → <audio>).
+    /* métadonnées de la piste audio : décodage asynchrone (blob → AudioBuffer).
        Informatif seulement — la lecture RÉELLE est mesurée plus bas (audioSec2). */
     await page.waitForFunction(() => {
-      const a = document.getElementById('externalAudio');
+      const a = AudioSync.element;
       return a && a.readyState >= 1 && isFinite(a.duration) && a.duration > 0;
     }, null, { timeout: 20000 }).catch(() => {});
     r.audioSec   = await page.evaluate(() => {
-      const a = document.getElementById('externalAudio');
+      const a = AudioSync.element;
       return isFinite(a.duration) && a.duration > 0 ? Math.round(a.duration * 100) / 100 : null;
     });
     r.build      = readBuild(logs);
@@ -219,7 +219,7 @@ async function runCase(ctx, base, file, pick) {
        (l'armement de la vitesse est fait au chargement, cf. applySpeed). */
     const t0 = await page.evaluate(() => {
       window.__probe.spWrites = 0; window.__probe.spValues = [];
-      const a = document.getElementById('externalAudio');
+      const a = AudioSync.element;
       return { tp: Player.S.api.timePosition, ct: a.currentTime * 1000, wall: Date.now() };
     });
     /* On joue SECONDS… ou jusqu'à la fin du morceau (exemples courts, loops) :
@@ -231,7 +231,7 @@ async function runCase(ctx, base, file, pick) {
     for (let i = 0; i < SECONDS; i++) {
       await page.waitForTimeout(1000);
       const s = await page.evaluate(() => {
-        const a = document.getElementById('externalAudio');
+        const a = AudioSync.element;
         return { tp: Player.S.api.timePosition, ct: a.currentTime * 1000, state: Player.S.api.playerState };
       });
       if (isFinite(s.tp) && s.tp > maxTp) maxTp = s.tp;
@@ -239,7 +239,7 @@ async function runCase(ctx, base, file, pick) {
       if (s.state !== PLAYING) { ended = true; break; }
     }
     const t1 = await page.evaluate(() => {
-      const a = document.getElementById('externalAudio');
+      const a = AudioSync.element;
       return { tp: Player.S.api.timePosition, ct: a.currentTime * 1000, wall: Date.now(),
                paused: a.paused, probe: window.__probe, mix: MixSync._probe() };
     });
@@ -292,7 +292,7 @@ async function runCase(ctx, base, file, pick) {
     try {
       r.diag = await page.evaluate(() => {
         const L = document.querySelector('#loader');
-        const a = document.getElementById('externalAudio');
+        const a = AudioSync.element;
         const hasP = typeof Player !== 'undefined';
         const hasM = typeof MixSync !== 'undefined';
         return {

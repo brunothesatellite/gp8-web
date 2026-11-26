@@ -15,7 +15,8 @@
    *  Principe — alphaTab reste MAÎTRE DU TEMPS (playerMode = synthesizer) :
    *    ✔ métronome, volumes MIDI, mute/solo, boucle A→B, curseur, highlighting
    *    ✔ lecture/pause/stop/seek pilotent les DEUX flux
-   *  Notre balise <audio> joue en ESCLAVE du synthé.
+   *  Notre piste AudioBufferSourceNode (js/audio-sync.js) joue en ESCLAVE du
+   *  synthé, dans le MÊME AudioContext : une seule horloge, plus de <audio>.
    *
    *  Pont temporel — on réutilise l'algorithme exact d'alphaTab, exposé
    *  publiquement :
@@ -29,16 +30,13 @@
    *  segment. Comme on joue le MÊME fichier audio brut, l'axe temporel est
    *  identique à celui d'alphaTab → pas de dérive d'origine.
    *
-   *  Correction en cours de lecture — loi RÉELLE (cf. constantes plus bas) :
-   *    |dérive| > 400 ms          → recale immédiat (seek)
-   *    100 ms ≤ |dérive| ≤ 400 ms → ajustement de playbackRate, au plus UNE
-   *                                 écriture toutes les 1500 ms (±10 %)
-   *    |dérive| < 100 ms          → ZONE MORTE : loi « protège » (remise au
-   *                                 neutre si elle rapproche du taux natif,
-   *                                 sinon silence) — arbitrée par
-   *                                 tools/tempo-correct-sim.js.
-   *  `preservesPitch` étant actif par défaut, ces micro-variations de
-   *  vitesse ne transposent PAS le son.
+   *  Correction en cours de lecture :
+   *  · AudioBufferSourceNode (P2) : même ctx.currentTime que le synthé ;
+   *    un seul recalage au démarrage (±150 ms max), puis AUCUNE écriture de
+   *    playbackRate (cela transposerait le MP3) et aucun seek de correction.
+   *  · Ancien chemin média (si un moteur externe l'utilise encore) : la loi
+   *    historique reste ci-dessous (seek > 400 ms, rate 100-400 ms, zone morte
+   *    < 100 ms) — arbitrée par tools/tempo-correct-sim.js.
    *
    *  TEMPO PRÉ-CUIT (stratégie C, BUGFIX-TOTAL P2) : le tempo de
    *  l'enregistrement n'est PLUS appliqué par `playbackSpeed` en lecture
@@ -80,31 +78,37 @@
     const STAT_MS    = 5000; // périodicité du rapport d'instrumentation
 
     /* --- discontinuités + pente locale (correctif audio, BUGFIX-TOTAL §2/§3) ---
-       Un segment [p → q] est un SAUT (discontinuité à re-ancrer) quand l'axe
+       Un segment [p → q] est un SAUT (discontinuité à re-anchorer) quand l'axe
        audio fait un mouvement impossible pour un tempo : il RECULE (Δa < 0)
        ou bondit hors de toute plage musicale (pente hors [1/JUMP_SLOPE,
-       JUMP_SLOPE]). Ces segments ne doivent JAMAIS être balayés par
-       l'interpolation : on les re-ancre sur le bloc destination (cf. build +
-       audioMsFor) → un seul seek par discontinuité. Un simple écart de tempo
-       — même fort — reste géré par la pente locale (da/dt), qui pilote
-       playbackRate : le mp3 converge vers le tempo du MIDI au lieu de sécuer
-       dans les limites de ±10 %.                                           */
+       JUMP_SLOPE]) et qu'il n'est PAS le dernier segment. Le dernier segment
+       est presque toujours une queue d'outro (barre finale plus longue que la
+       notation) : le pré-cuit peut l'étirer, il ne faut pas le traiter comme
+       un saut de fin qui couperait l'audio.
+
+       SLOPE_MIN/MAX encadrent la pente que le pré-cuit accepte de rejouer. Ils
+       sont volontairement larges (0,2 … 12) : un tempo adaptatif peut ralentir
+       ou accélérer fortement sans être une discontinuité. Un segment hors de
+       cette plage reste un saut (une section entière sautée). */
     const JUMP_SLOPE = 3.0;  // au-delà : téléport audio, pas un tempo
-    const SLOPE_MIN  = 0.5;  // clamp de la pente locale → rate plancher
-    const SLOPE_MAX  = 2.0;  // clamp de la pente locale → rate plafond
+    const FORWARD_JUMP_MS = 1500; // saut avant : il faut AUSSI une distance audio
+    const SLOPE_MIN  = 0.2;  // clamp de la pente locale → rate plancher
+    const SLOPE_MAX  = 12.0; // clamp de la pente locale → rate plafond
 
     /* --- horloge musicale ---------------------------------------------
-       ANCHOR_TOL_MS : tolérance du détecteur de saut d'horloge (seek,
-       stop, boucle, re-échelle d'alphaTab). Le tempo GP, lui, n'est plus
-       écrit en lecture : voir `prebake` (stratégie C). */
-    const ANCHOR_TOL_MS = 30;
+       L'axe pré-cuit est directement `api.timePosition × playbackSpeed`
+       (voir advanceMusicalClock). Plus d'intégration murale, donc plus de
+       tolérance de détection de saut : les seeks sont signalés par
+       `playerPositionChanged(isSeek)` et traités dans onPosition. */
 
     let points  = [];      // [{ t: axe PRÉ-CUIT, a: axe audio, jump, slope, rawSlope, tick }] trié par t
     let nJump   = 0;       // nb de segments de saut (discontinuités)
     let nOff    = 0;       // nb de segments à pente hors plage
     let avgSlope = 1;      // pente moyenne (audio / partition)
     let tempoScale = 1;    // 1/avgSlope = durée audio / durée partition (journal + repli)
-    let bias    = 0;       // décalage constant éventuel (calage manuel)
+    let bias    = 0;       // décalage constant mesuré audio ↔ position rapportée du synthé
+    let biasCalibrated = false;
+    let biasWindowStart = 0;
     let playing = false;
     let active  = false;
     let leadIn  = false;   // pré-roll : notation AVANT l'audio (1er syncTime < 0)
@@ -112,9 +116,8 @@
     let note    = '';
 
     let userSpeed = 1;     // vitesse utilisateur (seule écriture de playbackSpeed)
-    let musMs   = 0;       // HORLOGE MUSICALE : ∫ playbackSpeed·dt = axe PRÉ-CUIT
-    let musRef  = -1;      // dernier api.timePosition vu (détection de saut/seek)
-    let musWall = 0;       // dernier instant réel (performance.now) de l'horloge
+    let musMs   = 0;       // axe PRÉ-CUIT = timePosition × vitesse utilisateur
+    let musRef  = -1;      // dernier api.timePosition vu (traçage)
 
     /* état de la boucle + instrumentations (rapportées toutes les STAT_MS) */
     let lastControl = 0, lastWrite = 0, lastMaster = -1;
@@ -170,7 +173,17 @@
         if (!q) { p.rawNot = 1; p.notSlope = 1; p.jump = false; continue; }
         const dt = q.tNot - p.tNot, da = q.a - p.a;
         p.rawNot = dt > 0 ? da / dt : 1;
-        p.jump = (da < 0) || (p.rawNot < 1 / JUMP_SLOPE) || (p.rawNot > JUMP_SLOPE);
+        /* Le DERNIER segment (i === n-2) n'est jamais classé saut pour une
+           pente positive : c'est l'outro/la dernière tenue, que le pré-cuit
+           doit étirer jusqu'à la fin de l'audio. Un recul audio reste un
+           saut.
+           Un saut AVANT n'est retenu que si la distance audio est grande
+           (FORWARD_JUMP_MS) : une pente > 3 sur 100-500 ms est un changement
+           de tempo adaptatif (intro d'Iron Maiden), pas un trou de plusieurs
+           secondes. */
+        const isTail = (i === n - 2);
+        const forwardJump = p.rawNot > JUMP_SLOPE && da > FORWARD_JUMP_MS;
+        p.jump = (da < 0) || (!isTail && (p.rawNot < 1 / JUMP_SLOPE || forwardJump));
         p.notSlope = clamp(p.rawNot, SLOPE_MIN, SLOPE_MAX);
         if (p.jump) nJump++;
         else if (p.rawNot < SLOPE_MIN || p.rawNot > SLOPE_MAX) nOff++;
@@ -228,6 +241,8 @@
         const seg = segmentsFrom(raw);   // LA table partagée avec prebake
         points = seg.points; nJump = seg.nJump; nOff = seg.nOff; avgSlope = seg.avgSlope;
         tempoScale = (isFinite(avgSlope) && avgSlope > 0) ? 1 / avgSlope : 1;
+        musMs = 0;
+        bias = 0; biasCalibrated = false; biasWindowStart = 0;
         musRef = -1;                     // nouvelle table → horloge ré-ancrée
         note = points.length
           ? points.length + ' point(s) de synchro'
@@ -265,16 +280,23 @@
 
     /* ---- PRÉ-CUISSON du tempo dans le MidiFile (stratégie C) -----------
        Appelée par player.js juste après `MidiFileGenerator.generate()` :
-       on RÉÉCRIT les `TempoChangeEvent` du fichier généré aux ticks des
-       points de synchro, avec `tempoNatif / notSlope` — la règle de SEGMENT
-       ci-dessus, LA MÊME que le pont. Le lecteur live applique alors la
-       partition au tempo de l'enregistrement, segment par segment, avec
-       `playbackSpeed` CONSTANT : plus aucune coupure du synthé (RC-2/RC-3).
+       on RÉÉCRIT les `TempoChangeEvent` du fichier généré pour que la durée
+       RÉELLE de chaque segment [p → q] du MIDI soit exactement `q.t - p.t`
+       (l'axe pré-cuit de la table du pont). Formule directe, indépendante du
+       tempo natif :
 
-       On retire TOUS les tempos natifs puis on repose un tempo par point de
-       synchro : à l'intérieur d'un segment, l'axe est donc celui de la
-       pré-cuisson (mêmes durées que l'audio), et `segmentsFrom().points[].t`
-       le décrit exactement. Renvoie le nombre de tempos écrits. */
+           bpm = Δtick · 60000 / (division · Δt)
+
+       où Δt = q.t - p.t. C'est exact même si le segment contient plusieurs
+       changements de tempo natifs : l'ancienne formule `nativeAt / notSlope`
+       ne l'était pas (écarts mesurés jusqu'à 205 ms sur Four Horsemen).
+
+       Le premier point peut être au tick 0 (cas normal) : son tempo est écrit
+       au tick 0. S'il est plus loin, on écrit d'abord un tempo qui amène le
+       MIDI au tick du premier point exactement à `p.t` (l'axe natif d'avant
+       le premier point de synchro).
+
+       On retire TOUS les tempos natifs puis on repose la carte calculée. */
     function prebake(midiFile, raw, tickShift) {
       try {
         if (!midiFile || !midiFile.tracks || !midiFile.tracks.length) return 0;
@@ -284,28 +306,47 @@
         const seg = segmentsFrom(raw);
         if (!seg.points.length) return 0;
         const shift = isFinite(tickShift) ? tickShift : 0;
+        const div = midiFile.division || 960;
+        /* Bornes SMF : 60000000/0xFFFFFF ≈ 3,58 BPM. On garde une marge et
+           on plafonne très haut : les tempos adaptatifs peuvent être lents. */
+        const BPM_MIN = 3.6;
+        const BPM_MAX = 2000;
+        const tempos = new Map();      // tick → bpm (dernier gagne)
 
-        // 1. tempos NATIFS (avant suppression) : référence de tempo du segment
-        const native = [];
-        for (const tr of midiFile.tracks) {
-          for (const e of tr.events) if (e.type === TT && e.beatsPerMinute > 0) native.push(e);
-        }
-        native.sort((a, b) => a.tick - b.tick);
-        const nativeAt = (tick) => {
-          let b = 120;
-          for (const e of native) { if (e.tick <= tick) b = e.beatsPerMinute; else break; }
-          return b;
+        const addTempo = (tick, bpm) => {
+          if (!isFinite(tick) || !isFinite(bpm) || bpm <= 0) return;
+          tick = Math.round(tick);
+          tempos.set(tick, Math.min(BPM_MAX, Math.max(BPM_MIN, bpm)));
         };
 
-        // 2. on retire tous les tempos : la pré-cuisson pilote l'axe entier
+        const pts = seg.points;
+        const p0 = pts[0];
+
+        /* Avant le premier point : l'axe du pont vaut l'axe natif (p0.t).
+           Un seul tempo constant suffit à faire coïncider le tick p0.tick
+           avec p0.t. */
+        if (p0.tick > 0 && p0.t > 0) {
+          addTempo(0, p0.tick * 60000 / (div * p0.t));
+        }
+
+        /* Un tempo par segment : la durée produite vaut q.t - p.t. */
+        for (let i = 0; i < pts.length - 1; i++) {
+          const p = pts[i], q = pts[i + 1];
+          const dTick = q.tick - p.tick;
+          const dT = q.t - p.t;
+          if (dTick <= 0 || dT <= 0) continue;
+          addTempo(p.tick + shift, dTick * 60000 / (div * dT));
+        }
+
+        /* Fichier à point unique (ou segments dégénérés) : garder un tempo. */
+        if (tempos.size === 0) addTempo(p0.tick + shift, 120);
+
+        // 1. on retire tous les tempos natifs : la pré-cuisson pilote l'axe
         for (const tr of midiFile.tracks) tr.events = tr.events.filter(e => e.type !== TT);
 
-        // 3. un tempo pré-cuit par point de synchro
+        // 2. on repose la carte triée par tick
         let n = 0;
-        for (const p of seg.points) {
-          const tick = p.tick + shift;
-          const bpm = nativeAt(tick) / (p.notSlope > 0 ? p.notSlope : 1);
-          if (!(bpm > 0) || !isFinite(bpm)) continue;
+        for (const [tick, bpm] of [...tempos.entries()].sort((a, b) => a[0] - b[0])) {
           const ev = new midi.TempoChangeEvent(tick, 0);
           ev.beatsPerMinute = bpm;
           midiFile.addEvent(ev);
@@ -368,29 +409,20 @@
       return points[lo].slope;
     }
 
-    /* ---- HORLOGE MUSICALE : ∫ playbackSpeed·dt ----
-       api.timePosition est un axe REEL (1 ms/ms de temps wall) qu'alphaTab
-       re-echelonne a chaque changement de vitesse (timePosition *= old/new).
-       `timePosition × playbackSpeed` EST l'axe interne du synthé (donc l'axe
-       PRÉ-CUIT) ; on integre tout de meme ∫ sp·dt a la cadence des evenements
-       (~344/s : precision <1 ms entre deux frontieres) car cela reste exact
-       quand la vitesse change, et sur saut detecte (seek, stop, boucle,
-       re-echelonnement vendor) on RE-ANCRE plutot que d'integrer un trou :
-       le re-echelonnement conservant la position musicale, l'ancre `real × sp`
-       retrouve exactement musMs. */
+    /* ---- AXE PRÉ-CUIT : `timePosition × playbackSpeed` ----
+       `api.timePosition` est l'axe public d'alphaTab : il avance de 1 ms par
+       ms réelle et il est re-échelonné par le vendor à chaque changement de
+       vitesse (`timePosition *= old/new`). L'axe interne du séquenceur (donc
+       l'axe PRÉ-CUIT de notre table) est exactement `timePosition × sp`.
+
+       On ne l'intègre PLUS avec `performance.now()` : c'était ajouter le jitter
+       du main thread et la dérive de l'horloge murale sur une valeur déjà
+       exacte. Un seek/stop/boucle est traité à part par `onPosition(isSeek)`. */
     function advanceMusicalClock(api, now) {
       const real = api.timePosition || 0;
       const sp = curSpeed();
-      if (musRef < 0) {                       // premiere passe / nouvelle table
-        musMs = real * sp; musRef = real; musWall = now;
-        return musMs;
-      }
-      let dw = now - musWall; if (dw < 0) dw = 0;
-      musMs += dw * sp;
-      // sur l'axe reel, timePosition avance de ~1 ms par ms wall ; un ecart
-      // superieur a la tolerance = repositionnement (seek/stop/boucle/rescale).
-      if (Math.abs(real - musRef - dw) > ANCHOR_TOL_MS + dw * 0.5) musMs = real * sp;
-      musRef = real; musWall = now;
+      musMs = real * sp;
+      musRef = real;
       return musMs;
     }
 
@@ -406,6 +438,8 @@
         api.playbackSpeed = userSpeed;         // re-échelle la position : on ré-ancre
         musRef = -1;
       }
+      const a = el();
+      if (a && typeof a.setSpeed === 'function') a.setSpeed(userSpeed);
       setRate(userSpeed);
     }
 
@@ -428,24 +462,41 @@
       // −1014 ms, Blink −565 ms). C'est le PRÉ-ROLL, géré par correct() ;
       // on ne le borne PAS ici (un clamp masquerait le pré-roll et laisserait
       // un résidu permanent).
-      const ms = audioMsFor(musMs);
+      const ms = audioMsFor(musMs) + bias;
       return isFinite(ms) ? ms / 1000 : null;
     }
 
+    let pendingSeek = null, seekBound = false;
     function seekTo(sec) {
       const a = el();
       if (!a || sec == null) return;
       if (sec < 0) sec = 0;                          // l'audio ne connaît pas le négatif
+      /* Tant que les métadonnées ne sont pas là, `currentTime =` est ignoré
+         (ou lève) : on mémorise la cible et on l'applique à `loadedmetadata`.
+         C'était la cause d'un démarrage à 0 suivi d'un saut au premier play. */
+      if (a.readyState < 1) {
+        pendingSeek = sec;
+        if (!seekBound) {
+          seekBound = true;
+          a.addEventListener('loadedmetadata', () => {
+            if (pendingSeek == null) return;
+            const s = pendingSeek; pendingSeek = null;
+            try { a.currentTime = s; } catch (e) {}
+          });
+        }
+        return;
+      }
       try {
         if (Math.abs(a.currentTime - sec) > 0.02) a.currentTime = sec;
-      } catch (e) { /* metadata pas encore disponibles */ }
+      } catch (e) { pendingSeek = sec; }
     }
 
-    /* recalage immédiat (seek utilisateur, boucle A→B, changement de source) */
+    /* recalage immédiat (démarrage, reprise après count-in, changement de
+       source). Les seeks utilisateur/boucle passent par onPosition(isSeek). */
     function resync() {
       if (!active) return;
       const api = Player.S.api;
-      if (api) { musMs = (api.timePosition || 0) * curSpeed(); musRef = -1; }
+      if (api) { const real = api.timePosition || 0; musMs = real * curSpeed(); musRef = real; }
       leadIn = false;
       seekTo(targetSeconds());
     }
@@ -453,10 +504,12 @@
     /* ---- boucle de correction ----
        `playerPositionChanged` arrive ~344 fois/s (cf. CONTROL_MS plus haut) :
        on compte CHAQUE appel (pour mesurer la tempête) mais on ne décide
-       qu'au plus toutes les CONTROL_MS. */
-    function onPosition() {
+       qu'au plus toutes les CONTROL_MS. `e.isSeek` (seek utilisateur, boucle
+       A→B, stop, repositionnement) est traité IMMÉDIATEMENT, sans attendre la
+       cadence de 250 ms. */
+    function onPosition(e) {
       const t0 = performance.now();
-      try { correct(); } finally {
+      try { correct(e); } finally {
         nCall++;
         msHandler += performance.now() - t0;
       }
@@ -480,14 +533,34 @@
       statWin0 = now;
     }
 
-    function correct() {
+    function correct(e) {
       if (!active || counting) return;
       const api = Player.S.api;
       const a = el();
       if (!api || !a || !a.src) return;
 
       const now = performance.now();
-      advanceMusicalClock(api, now);           // axe PRÉ-CUIT du pont (∫ sp·dt)
+
+      /* Seek explicite (utilisateur, boucle A→B, stop, repositionnement) :
+         on recale l'audio TOUT DE SUITE sur la position que le worker vient
+         de calculer. Ne pas passer par `api.timePosition` : le setter
+         `tickPosition` met à jour le tick sans recalculer timePosition, donc
+         l'ancienne valeur ferait un premier seek au mauvais endroit. */
+      if (e && e.isSeek) {
+        const real = isFinite(e.currentTime) ? e.currentTime : (api.timePosition || 0);
+        musMs = real * curSpeed();
+        musRef = real;
+        leadIn = false;
+        seekTo(targetSeconds());
+        setRate(curSpeed());
+        lastControl = now;
+        lastWrite = now;
+        lastMaster = -1;
+        if (!biasCalibrated) biasWindowStart = 0;
+        return;
+      }
+
+      advanceMusicalClock(api, now);           // axe PRÉ-CUIT = timePosition × sp
       const target = targetSeconds();
       if (target == null) return;
 
@@ -547,6 +620,34 @@
 
       const sp = curSpeed();
       const slope = slopeNow();                       // pente locale (clampée)
+
+      /* P2 — AudioBufferSourceNode partage l'horloge du synthé. Une dérive
+         résiduelle ne peut être qu'un offset constant (latence du rapport de
+         position du synthé / démarrage) : on le mesure UNE fois, puis on ne
+         module JAMAIS le playbackRate pour le corriger (cela transposerait le
+         MP3). Au-delà de HOLD_MS, un seul seek recale. */
+      if (a.isBufferEngine) {
+        if (playing && !biasCalibrated) {
+          if (!biasWindowStart) biasWindowStart = now;
+          if (now - biasWindowStart >= 1000) {
+            if (Math.abs(drift) >= 5 && Math.abs(drift) <= 150) {
+              /* Un seul recalage au démarrage : la source et le synthé
+                 partagent ensuite le MÊME ctx.currentTime. */
+              seekTo(target);
+              biasCalibrated = true;
+              nSeek++;
+              return;
+            } else if (Math.abs(drift) < 5) {
+              biasCalibrated = true;
+            } else {
+              biasWindowStart = now;        // saut/seek : réessayer après stabilisation
+            }
+          }
+        }
+        if (Math.abs(drift) > HOLD_MS) { seekTo(target); nSeek++; }
+        return;
+      }
+
       if (Math.abs(drift) > HOLD_MS) {                // recadrage franc
         seekTo(target);
         setRate(sp);                                  // réapplique vitesse × pente
@@ -593,6 +694,7 @@
 
       setRate(curSpeed());
       if (playing && !counting) {
+        if (!biasCalibrated) biasWindowStart = 0;
         resync();                                     // on cale AVANT de démarrer
         const t = targetSeconds();
         if (t != null && t < 0) {                     // pré-roll : rien à jouer
@@ -620,11 +722,14 @@
       if (!a) return;
       try { a.preservesPitch = true; } catch (e) {}
       // vitesse utilisateur × pente locale du pont : l'audio suit le tempo noté
-      a.playbackRate = clamp(speed * slopeNow(), 0.06, 16);
+      const target = clamp(speed * slopeNow(), 0.06, 16);
+      /* Ne pas réécrire la même valeur : chaque écriture peut reconfigurer
+         la chaîne média. C'est le prix d'un seek/loop gratuit. */
+      if (Math.abs(a.playbackRate - target) > 1e-4) a.playbackRate = target;
     }
 
     /* ---- cycle de vie ---- */
-    function start()   { active = true; playing = false; leadIn = false; resetStats(); musRef = -1; setRate(speed); }
+    function start()   { active = true; playing = false; leadIn = false; resetStats(); musMs = 0; musRef = -1; setRate(speed); }
     function stop()    {
       active = false; playing = false; leadIn = false;
       const a = el();
@@ -668,7 +773,7 @@
       start, stop, suspend,
       setUserSpeed,
       /* sonde de banc (jamais utilisée par l'app) : état interne courant */
-      _probe: () => ({ musMs: musMs, target: targetSeconds(), slope: slopeNow(), speed: curSpeed(), n: points.length, p0t: points.length ? points[0].t : 0, p0a: points.length ? points[0].a : 0, p0s: points.length ? points[0].slope : 0 }),
+      _probe: () => ({ musMs: musMs, target: targetSeconds(), slope: slopeNow(), speed: curSpeed(), n: points.length, p0t: points.length ? points[0].t : 0, p0a: points.length ? points[0].a : 0, p0s: points.length ? points[0].slope : 0, bias: bias, biasCalibrated: biasCalibrated }),
       get active() { return active; },
       get info()   { return { points: points.length, note: note, bias: bias,
                               tempoScale: tempoScale, userSpeed: userSpeed }; },

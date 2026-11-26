@@ -21,13 +21,16 @@
 
 | Invariant | Preuve |
 |---|---|
-| `playbackSpeed` **jamais écrit en lecture** (⇒ 0 coupure de synthé) | banc `mix-sync-harness` **16/16** (`tempoWrites = 0`) + navigateur réel |
+| `playbackSpeed` **jamais écrit en lecture** (⇒ 0 coupure de synthé) | banc `mix-sync-harness` **17/17** (`tempoWrites = 0`) + navigateur réel |
 | 0 erreur console | navigateur réel, chaque morceau |
 | dérive de croisière bornée par la zone morte | **0-11 ms** (banc), **10-79 ms** (navigateur) |
 | anacrouses alignées sur l'audio | **7/7 ≤ 0,04 %** |
-| fin de webapp **jamais** au-delà du MP3 | **16/16** |
-| oracle de renvoi : converge en **une** passe sur les 16 | `tools/repeat-check` (propriété D) |
-| `node tools/test-all.js` | **8/8**, exit 0 |
+| fin de webapp **jamais** au-delà du MP3 | **17/17** |
+| plan GPIF : **0 clé manquante** sur les 17 | `tools/sync-coherence.js --strict` (exit 0) |
+| P2 : audio dans l'AudioContext du synthé | `browser/p2-check` — 0 rate/seek, dérive 2-8 ms |
+| P2b : vitesses ×0,5/×1,5 sans transposition | `browser/p2-check` — `preservesPitch`, dérive < 25 ms |
+| `node tools/test-all.js` | **9/9**, exit 0 (dont `sync-coherence --strict`). |
+| audit de cohérence `tools/sync-coherence.js` | **17 fichiers : 0 clé manquante, 0 axe, 0 pente hors plage, 0 tail ; `--strict` passe (P1)** |
 
 **Question posée à l'oreille** : le **ressenti** (timbre, « colle » MIDI↔MP3,
 nature des sauts, transitions de tempo). Les chiffres disent *« pas de
@@ -414,6 +417,31 @@ n'atteignait pas son optimum en **une** passe (2 clés GPIF non couvertes sur M.
 
 ---
 
+### 5.17 · Nirvana — Mr. Moustache  ⚠ *fiche critique (ajoutée le 26/11/2026)*
+`Nirvana (1989 - Bleach) - Mr. Moustache.gp`
+**Angle** : **deux voltes à fins adjacentes** (M.30-32 et M.42-45) + **D.S. al Coda** + tempo audio très différent du tempo noté (120 → ≈167 BPM) + outro longue. C'est le premier fichier où l'oracle ne lève **aucun** groupe et où `gotoBar()` est prouvé faux.
+**Machine** : 45 mesures · 2 pistes · 121 points GPIF · **121 générés (plan GPIF)** · **0 clé manquante** · 1 saut structurel · 0 pente hors plage · H1 sans objet · MIDI plan 224,0 s → pré-cuit 200,8 s · audio 201,1 s.
+
+| # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
+|---|---|---|---|---|---|
+| 1 | continu | M.1-3 (4 passes) | tempo ≈167 BPM, aucune dérive | | |
+| 2 | continu | M.6-M.7 (5 passes jouées ; GP jusqu'à 7) | aucun saut, aucun ralentissement/accélération | | |
+| 3 | ≈ 01:23-01:26 | **M.30-M.32** (fin 1 M.31, fin 2 M.32 + D.S. al Coda) | M.31 **et** M.32 jouées ; une seule transition | | |
+| 4 | ≈ 02:58-03:21 | **M.42-M.45** (2 fins) | les fins dans l'ordre, M.45 puis l'outro | | |
+| 5 | ≈ 03:21 (201,1 s) | fin | l'audio va jusqu'au bout ; pas de coupure | | |
+| 6 | seek | **M.27** | le seek doit arriver à **1:18** (77,99 s), pas à 0:36 | | |
+| 7 | boucle | **M.12-M.13** | boucle ≈ 49,3-50,7 s, un seul seek | | |
+| 8 | global | tout | audio natif (pas de voix accélérée), MIDI collé | | |
+
+**Note d'analyse (26/11/2026)** : **avant P0**, `gotoBar(26)` (M.27) écrivait le tick **partition** `99 840` dans `api.tickPosition`, qui attend un tick **performance** : le lecteur allait à **35,96 s / M.12** au lieu de **77,99 s / M.27**. Sur AC/DC, le même bug envoyait M.27 à **53,44 s** au lieu de **142,49 s**. **Corrigé en P0** (`perfStartOfBar` + `isSeek`) ; vérifié par `tools/browser/p0-check.js`. Voir `ANALYSE-AUDIO-SYNC-2026-11-26.md` §3.2 et §7.
+
+**Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
+**Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
+**Verdict morceau** : ☐ ✅ ☐ 🟡 ☐ ❌ ☐ ? — **Anomalie(s)** n° ____________
+**Notes** : ________________________________________________________________
+
+---
+
 ## 6. Fiche vierge (pour un nouveau morceau)
 
 ```
@@ -454,6 +482,7 @@ n'atteignait pas son optimum en **une** passe (2 clés GPIF non couvertes sur M.
 | 14 | Slayer — Hell Awaits | | | |
 | 15 | The Offspring — Self Esteem | | | |
 | 16 | Nirvana — Come as you are | | | |
+| 17 | Nirvana — Mr. Moustache | | | |
 | — | **X1** Vitesse ×0,5 / ×1,5 | | | |
 | — | **X2** Isolation A/B *(si requis)* | | | |
 | — | **Mobile** (Pixel 7a, voir BUGFIX-TOTAL §7) | | | |
