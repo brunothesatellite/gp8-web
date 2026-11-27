@@ -13,6 +13,9 @@
 
      1. les clés GPIF (« mesure.occurrence ») au déroulé réel
         (`RepeatOracle.walkMaxOcc`) — clés manquantes ;
+     1 bis. la séquence de notation brute P à la séquence du plan : P doit
+        être une sous-séquence du plan. Une passe perdue fusionne deux
+        mesures et fait étirer le tempo par le pré-cuit (÷ 2) ;
      2. l'axe « pré-cuit » de la table du pont (`points[].t`, calculé par
         segmentsFrom) au temps RÉEL du MidiFile pré-cuit au même tick —
         l'écart est ce que le contrôleur devra corriger en lecture ;
@@ -65,6 +68,38 @@ function extractFn(src, name) {
 const playerSrc = fs.readFileSync(path.join(ROOT, 'js', 'player.js'), 'utf8');
 const fixEmptyAnacrusis = new Function(extractFn(playerSrc, 'fixEmptyAnacrusis') + '; return fixEmptyAnacrusis;')();
 const normalizeMultiClosingRepeats = new Function(extractFn(playerSrc, 'normalizeMultiClosingRepeats') + '; return normalizeMultiClosingRepeats;')();
+
+/* Séquence de notation brute, AVANT l'installation du plan : c'est la
+   référence à couvrir. On garde la méthode d'origine pour ne pas dépendre
+   des métriques internes de l'oracle. */
+const RAW_PLAY = MFG._playThroughSong;
+function notationOf(score) {
+  const out = [];
+  const restore = normalizeMultiClosingRepeats(score);
+  try {
+    RAW_PLAY.call(MFG, score, [], false,
+      (bar) => { if (bar && typeof bar.index === 'number') out.push(bar.index); },
+      () => {}, () => {});
+  } finally {
+    if (restore) restore();
+  }
+  return out;
+}
+/* Longueur de la plus longue sous-séquence commune : P doit être une
+   sous-séquence du plan (toutes les passes de notation, dans l'ordre). */
+function lcsLength(a, b) {
+  const n = a.length, m = b.length;
+  if (!n || !m) return 0;
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  return dp[0][0];
+}
 
 require(path.join(ROOT, 'js', 'repeat-oracle.js'));
 const RO = globalThis.RepeatOracle;
@@ -138,6 +173,7 @@ function loadScore(file) {
 function analyze(file) {
   const score = loadScore(file);
   fixEmptyAnacrusis(score);
+  const notation = notationOf(score);
   const raised = RO.raise(score, MFG, null);
   const report = RO.lastReport();
   const rawPts = MFG.generateSyncPoints(score) || [];
@@ -157,6 +193,14 @@ function analyze(file) {
   const nTempos = MixSync.prebake(midi, raw, handler.tickShift);
   const preTl = midiTimeline(midi);
   const shift = handler.tickShift || 0;
+
+  /* 1 bis. couverture de la notation par le plan de lecture.
+     Le plan peut contenir des passes GPIF supplémentaires (audio seul), mais
+     il ne doit JAMAIS perdre une passe de notation : sinon le pré-cuit étire
+     la mesure précédente pour couvrir l'audio (tempo ÷ 2). */
+  const planBars = gen.tickLookup.masterBars.map(e => e.masterBar.index);
+  const notationKept = lcsLength(planBars, notation);
+  const notationDropped = Math.max(0, notation.length - notationKept);
 
   /* 1. clés GPIF uniques (mesure.occurrence) vs déroulé réel */
   const gpKeys = new Set();
@@ -218,6 +262,7 @@ function analyze(file) {
   return {
     file, base: path.basename(file), bars: score.masterBars.length,
     tracks: score.tracks.length, gpTotal, gpKeys: gpKeys.size, raw: rawPts.length,
+    planSteps: planBars.length, notation: notation.length, notationDropped,
     bridge: n, missing, raised, report,
     nTempos, bpm0: preTl.tempos.length ? preTl.tempos[0].bpm : null,
     nativeEnd: nativeTl.endTime, preEnd: preTl.endTime,
@@ -248,12 +293,14 @@ for (const f of files) {
   catch (e) { console.error('ECHEC ' + path.basename(f) + ' : ' + (e.stack || e.message).split('\n').slice(0, 3).join(' | ')); }
 }
 
-const hdr = ['fichier', 'mes', 'GPIF', 'gén.', 'clés', 'manq', 'levés', 'BPM0', 'natif', 'précuit', 'audio fin', 'axe', 'sauts', 'dont av/ar', 'hors', 'tail', 'barMap'];
+const hdr = ['fichier', 'mes', 'GPIF', 'gén.', 'plan', 'P', 'perd', 'clés', 'manq', 'levés', 'BPM0', 'natif', 'précuit', 'audio fin', 'axe', 'sauts', 'dont av/ar', 'hors', 'tail', 'barMap'];
 console.log('| ' + hdr.join(' | ') + ' |');
 console.log('|' + hdr.map(() => '---').join('|') + '|');
 for (const r of rows) {
   console.log('| ' + [
-    r.base.replace(/\.gp$/, '').slice(0, 40), r.bars, r.gpTotal, r.raw, r.gpKeys, r.missing,
+    r.base.replace(/\.gp$/, '').slice(0, 40), r.bars, r.gpTotal, r.raw,
+    r.planSteps, r.notation, r.notationDropped,
+    r.gpKeys, r.missing,
     r.raised, r.bpm0 ? r.bpm0.toFixed(1) : 'ABS',
     (r.nativeEnd / 1000).toFixed(1) + 's', (r.preEnd / 1000).toFixed(1) + 's',
     (r.lastAudio / 1000).toFixed(2) + 's', Math.round(r.worstAxis) + ' ms',
@@ -279,22 +326,25 @@ if (mapRows.length) {
 const nMissing = rows.reduce((n, r) => n + r.missing, 0);
 const nAxis = rows.filter(r => Math.abs(r.worstAxis) > 5).length;
 const nTail = rows.filter(r => r.tailJump).length;
+const nDropped = rows.reduce((n, r) => n + r.notationDropped, 0);
 const nMap = rows.filter(r => r.barMapDiff > 0).length;
 console.log('');
 console.log('clés GPIF manquantes (total) : ' + nMissing + ' sur ' + rows.length + ' fichier(s)');
+console.log('passes de notation perdues  : ' + nDropped + ' sur ' + rows.length + ' fichier(s)');
 console.log('axe > 5 ms                 : ' + nAxis + ' fichier(s)');
 console.log('saut de fin (outro)        : ' + nTail + ' fichier(s)');
 console.log('mesures avec traduction partition→performance : ' + nMap + ' fichier(s)  (attendu : ce n\'est plus un défaut depuis P0.1)');
 console.log('');
-console.log('LECTURE : les clés manquantes, l\'axe et les sauts de fin sont les causes');
-console.log('racines mesurées des sauts/ralentissements. `--strict` est la cible P1');
-console.log('(0 clé, 0 axe, 0 tail). La traduction partition→performance est faite par');
-console.log('js/player.js (perfStartOfBar) ; le plan GPIF par js/repeat-oracle.js.');
+console.log('LECTURE : les clés manquantes, les passes de notation perdues, l\'axe et');
+console.log('les sauts de fin sont les causes racines mesurées des sauts/ralentissements.');
+console.log('`--strict` est la cible P1 (0 clé, 0 notation perdue, 0 axe, 0 tail).');
+console.log('La traduction partition→performance est faite par js/player.js');
+console.log('(perfStartOfBar) ; le plan GPIF par js/repeat-oracle.js.');
 console.log('Audit de non-régression P1, hors tools/test-all.js :');
 console.log('  node tools/sync-coherence.js --strict');
 
 if (STRICT) {
-  const bad = nMissing + nAxis + nTail;
+  const bad = nMissing + nDropped + nAxis + nTail;
   process.exit(bad === 0 ? 0 : 1);
 }
 process.exit(0);

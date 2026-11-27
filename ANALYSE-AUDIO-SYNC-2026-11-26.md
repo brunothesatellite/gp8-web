@@ -589,8 +589,21 @@ façon de garantir 0 saut pour les arrangements divergents.
 **Critère** : `tools/sync-coherence.js --strict` :
 - `manq = 0` sur les 17 fichiers (ou liste d'exceptions audio-only
   documentée et justifiée par GPIF) ;
+- **`perd = 0`** : la séquence de notation brute P doit être une
+  sous-séquence du plan (LCS). Une passe perdue fusionne deux mesures et le
+  pré-cuit étire la première (tempo ÷ 2) — c'était la régression v1.3,
+  corrigée le 27/11/2026 : 136 passes perdues sur 17 fichiers, dont la
+  2ᵉ passe de M.3 dans For Whom the Bell Tolls et le 2ᵉ passage du thème de
+  The Four Horsemen ;
 - plus aucun saut avant non structurel ;
 - `barMap` corrigé (via P0).
+
+> **Limite connue (27/11/2026)** : les passes **audio-only** entre deux
+> ancres GPIF espacées (ex. Four Horsemen M.23 occ#2, ≈ 1:14) restent
+> étirées : le plan ne peut pas inventer les mesures intermédiaires que la
+> notation ne joue pas. Piste : remplir l'écart entre ancres avec l'ordre
+> des mesures du groupe de reprise, borné par l'écart audio. À traiter
+> séparément, avec le même audit `perd` comme garde-fou.
 
 ---
 

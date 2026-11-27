@@ -289,6 +289,13 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 | 8 | fin | fin | l'app s'arrête ≈ **3 s** avant la fin de l'audio (partition **429,1 s** / MP3 **432,6 s**) : la fin **ne doit pas couper** | | |
 | 9 | continu | tout | identique à la référence, 0 coupure | | |
 
+> **Note de correctif (27/11/2026)** : le 2ᵉ passage du thème (M.23, ≈ 0:34)
+> jouait à **0,48 mesure/s** (moitié du tempo) dans la v1.3 : le plan avait
+> perdu une passe de notation et le pré-cuit étirait la mesure précédente.
+> Corrigé : **0,84 mesure/s** (3 234 tk/s) après correctif. Le 3ᵉ passage
+> (M.23 occ#2, ≈ 1:14) reste lent (ancres GPIF espacées, passe audio sans
+> notation) : point à confirmer à l'écoute, distinct de la régression.
+
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
 **Verdict morceau** : ☐ ✅ ☐ 🟡 ☐ ❌ ☐ ? — **Anomalie(s)** n° ____________
@@ -305,6 +312,10 @@ produisent un **saut parasite** (voir les zones listées par fiche).
 |---|---|---|---|---|---|
 | 1 | continu | tout **dont après le chant** | tempo et phase tenus de bout en bout | | |
 | 2 | continu | tout | identique à la référence | | |
+
+> **Note de correctif (27/11/2026)** : après M.2, le plan avait perdu la
+> 2ᵉ passe de M.3 ; le pré-cuit jouait M.2 sur deux mesures (≈ 1 287 tk/s au
+> lieu de 1 887, soit 0,68×). Corrigé : **1 887 tk/s** (tempo natif).
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________

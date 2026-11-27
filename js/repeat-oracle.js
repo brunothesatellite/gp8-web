@@ -136,32 +136,30 @@
     return pairs;
   }
 
-  /* Construit le plan : toutes les passes GPIF dans l'ordre audio, plus les
-     mesures de notation SANS point GPIF qui les précèdent. Les mesures de
-     notation qui ont déjà des points GPIF ne sont pas dupliquées inutilement
-     (elles seraient une deuxième passe sans ancre). */
+  /* Construit le plan : toutes les passes GPIF dans l'ordre audio, plus TOUTES
+     les passes de notation dans l'ordre du contrôleur. Une passe de notation
+     n'est jamais supprimée sous prétexte que sa mesure a déjà un point GPIF :
+     l'appariement LCS peut avoir consommé ce point pour une autre passe, et
+     la passe restante serait alors fusionnée avec la suivante. C'est ce
+     fusionnement qui faisait étirer une mesure sur deux (tempo ÷ 2). */
   function buildPlan(score) {
     const G = gpGroupsOf(score);
     if (!G.length) return null;
     const P = captureNotation(score);
     if (!P.length) return null;
 
-    const gpBars = new Set(G.map(g => g.bar));
     const pairs = lcsPairs(G, P);
     const matchP = new Map(pairs.map(([g, p]) => [g, p]));
     const plan = [];
-    const seenBar = new Set();
     let pPtr = 0;
+    let plainCount = 0;
 
-    /* Une mesure de notation sans point GPIF est indispensable (intro,
-       pont…). Une mesure qui a des points GPIF n'est ajoutée qu'à sa
-       PREMIÈRE occurrence de notation : les passes supplémentaires sont
-       fournies par G, sinon on dupliquerait du contenu déjà ancré. */
+    /* Passe de notation sans ancre GPIF : intro, pont, ou passe non appariée
+       par le LCS. Elle est indispensable pour que le pré-cuit garde le tempo
+       naturel (une mesure = une durée de mesure, pas deux). */
     const pushPlain = (e) => {
-      const hasGp = gpBars.has(e.bar);
-      if (hasGp && seenBar.has(e.bar)) return;
       plan.push({ bar: score.masterBars[e.bar], gp: null });
-      seenBar.add(e.bar);
+      plainCount++;
     };
 
     for (let g = 0; g < G.length; g++) {
@@ -169,21 +167,23 @@
       if (p !== undefined) {
         while (pPtr < p) pushPlain(P[pPtr++]);
         plan.push({ bar: score.masterBars[P[p].bar], gp: G[g] });
-        seenBar.add(P[p].bar);
         pPtr = p + 1;
       } else {
         /* Passe GPIF absente de la notation : on l'insère à sa place audio. */
         plan.push({ bar: score.masterBars[G[g].bar], gp: G[g] });
-        seenBar.add(G[g].bar);
       }
     }
+
+    /* Toute la séquence de notation restante doit figurer dans le plan :
+       sinon les passes non ancrées sont fusionnées dans une seule barre et le
+       pré-cuit ralentit/accélère cette barre pour couvrir plusieurs mesures. */
+    while (pPtr < P.length) pushPlain(P[pPtr++]);
 
     /* Pas de mesures après la dernière ancre : la fin de l'audio est le
        dernier point GPIF ; ajouter du MIDI après ne ferait que déborder. */
 
     /* Occurrences RÉELLES du plan + réécriture des points GPIF. */
     const occ = new Map();
-    let inserted = 0;
     for (const step of plan) {
       const b = step.bar.index;
       const o = (occ.get(b) === undefined ? -1 : occ.get(b)) + 1;
@@ -193,10 +193,23 @@
         for (const sp of step.gp.points) {
           if (sp.syncPointValue) sp.syncPointValue.barOccurence = o;
         }
-      } else inserted++;
+      }
     }
 
-    return { plan, G, P, pairs, inserted, matched: plan.length - inserted };
+    /* Contrôle de couverture : chaque passe de notation doit être dans le plan
+       (appariée à un point GPIF, ou insérée en clair). `notationDropped` doit
+       rester à 0 ; il était > 0 avant le correctif (mesures fusionnées). */
+    const notationKept = plainCount + pairs.length;
+    const notationDropped = Math.max(0, P.length - notationKept);
+
+    return {
+      plan, G, P, pairs,
+      inserted: plainCount,
+      matched: plan.length - plainCount,
+      notation: P.length,
+      notationKept,
+      notationDropped
+    };
   }
 
   function ensurePlan(score) {
@@ -393,6 +406,9 @@
         planSteps: plan.plan.length,
         inserted: plan.inserted,
         matched: plan.matched,
+        notation: plan.notation,
+        notationKept: plan.notationKept,
+        notationDropped: plan.notationDropped,
         ncBefore: 0, ncAfter: 0,
         dangerBefore: 0, dangerAfter: 0,
         jumpsBefore: 0, jumpsAfter: 0,
@@ -402,7 +418,8 @@
       if (trace) {
         trace('oracle', 'plan GPIF : ' + plan.G.length + ' passe(s), ' +
           plan.plan.length + ' mesure(s) jouée(s), ' +
-          plan.inserted + ' mesure(s) de notation intercalée(s)');
+          plan.inserted + ' mesure(s) de notation intercalée(s), ' +
+          plan.notationDropped + ' perdue(s)');
       }
       return 0;
     } catch (e) {

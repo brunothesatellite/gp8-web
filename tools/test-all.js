@@ -32,7 +32,7 @@ const SUITE = [
   ['tempo-prebake-spike', "pré-cuisson livrée : fidélité par segment < 0,5 %"],
   ['mix-sync-harness',    "contrôleur RÉEL : tempoWrites = 0, dérive < 40 ms"],
   ['duration-check',      "P4 : anacrouse ↔ portée audio GPIF, fin de webapp ≤ MP3"],
-  ['sync-coherence',      "P1 : 0 clé GPIF, 0 axe pré-cuit, 0 tail", ['--strict']]
+  ['sync-coherence',      "P1 : 0 clé GPIF, 0 notation perdue, 0 axe pré-cuit, 0 tail", ['--strict']]
 ];
 
 if (!fs.existsSync(path.join(__dirname, 'vendor', 'alphaTab.js'))) {

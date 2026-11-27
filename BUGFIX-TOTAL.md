@@ -1,6 +1,6 @@
 # GP8-Web — Audio & synchro : bilan, impasses, plan, reste à faire
 
-> **Document unique** (dernière mise à jour : 2026-10-16).
+> **Document unique** (dernière mise à jour : 2026-11-27).
 > Il **remplace et fusionne** : `BUG.md`, `BUGMP3.md`, `BUGRENVOI.md`,
 > `BUGLATEST.md`, `RESPONSIVE.md`, `TESTSAMPLES.md`, `promp.md`, `TODO.md`
 > — tous supprimés le 2026-10-16 ; leur détail intégral reste dans l'historique
@@ -43,6 +43,21 @@
 > `preservesPitch` routé dans le même AudioContext via
 > `MediaElementAudioSourceNode` : time-stretch sans transposition (×0,5/×1,5
 > vérifiés, dérive < 25 ms).
+>
+> **Correctif de régression (2026-11-27) — passes de notation perdues.**
+> Le plan P1 sautait une passe de notation lorsque sa mesure avait déjà un
+> point GPIF. Or le LCS peut avoir consommé ce point pour une **autre** passe :
+> la passe restante disparaissait du plan, et le pré-cuit étirait la mesure
+> précédente sur deux mesures (tempo ÷ 2). Mesure : **136 passes perdues sur
+> 17/17 fichiers** ; FWTBT M.2 jouait à **1 287 tk/s au lieu de 1 887** ;
+> Four Horsemen, 2ᵉ passage du thème (M.23, ≈ 0:34) à **1 849 au lieu de
+> 3 234 tk/s**. Le correctif conserve **toutes** les passes de notation (y
+> compris la queue de séquence) ; `sync-coherence --strict` vérifie désormais
+> que la séquence de notation est une sous-séquence du plan (LCS) et échoue si
+> une passe est perdue. Après correctif : **0 perdue**, FWTBT **1 887 tk/s**,
+> Four Horsemen **3 234 tk/s** sur le 2ᵉ passage. Le 3ᵉ passage du thème
+> (M.23 occ#2, ≈ 1:14) reste lent : ancres GPIF espacées / passes audio sans
+> notation, cause distincte de cette régression.
 
 Projet : lecteur Guitar Pro **GP8-Web** — alphaTab 1.8.4 vendorisé + piste MP3
 embarquée dans le `.gp`/`.gpx`, avec synchronisation MIDI ↔ MP3.
