@@ -58,6 +58,18 @@
 > Four Horsemen **3 234 tk/s** sur le 2ᵉ passage. Le 3ᵉ passage du thème
 > (M.23 occ#2, ≈ 1:14) reste lent : ancres GPIF espacées / passes audio sans
 > notation, cause distincte de cette régression.
+>
+> **Affinage temporel des ancres (2026-11-27) — Mr. Moustache.** Le LCS
+> n'appariait les ancres GPIF que par **indice de mesure** ; quand les ancres
+> sont espacées (M.2.0 à 5,80 s, M.2.1 à 11,32 s), il choisissait la **2ᵉ**
+> passe de notation alors que l'audio en contient **deux de plus**, et le
+> pré-cuit étirait la 1ʳᵉ paire M.2/M.3 sur 4 mesures. `refinePairs` choisit
+> désormais l'occurrence de notation qui minimise l'écart entre l'écart audio
+> et l'écart de notation (durée médiane locale), par programmation dynamique
+> bornée (+4 mesures, pénalité de déviation, ordre strict). Mesure navigateur :
+> M.2 occ#0 **1 394 → 2 787 tk/s**, M.3 occ#0 **2 237 → 2 784 tk/s**, toutes
+> les occurrences à **0,72-0,74 mesure/s** ; M.1 corrigée aussi. Audit :
+> **0 notation perdue, 0 axe, 0 tail**, tests **9/9 + P0/P1/P2 + 17/17**.
 
 Projet : lecteur Guitar Pro **GP8-Web** — alphaTab 1.8.4 vendorisé + piste MP3
 embarquée dans le `.gp`/`.gpx`, avec synchronisation MIDI ↔ MP3.

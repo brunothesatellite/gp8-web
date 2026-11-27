@@ -598,12 +598,21 @@ façon de garantir 0 saut pour les arrangements divergents.
 - plus aucun saut avant non structurel ;
 - `barMap` corrigé (via P0).
 
-> **Limite connue (27/11/2026)** : les passes **audio-only** entre deux
-> ancres GPIF espacées (ex. Four Horsemen M.23 occ#2, ≈ 1:14) restent
-> étirées : le plan ne peut pas inventer les mesures intermédiaires que la
-> notation ne joue pas. Piste : remplir l'écart entre ancres avec l'ordre
-> des mesures du groupe de reprise, borné par l'écart audio. À traiter
-> séparément, avec le même audit `perd` comme garde-fou.
+> **Affinage temporel (27/11/2026)** : quand les ancres GPIF sont espacées,
+> le LCS par indice de mesure choisissait une occurrence de notation trop tôt
+> (Mr. Moustache : la 1ʳᵉ paire M.2/M.3 étirée sur 4 mesures). `refinePairs`
+> choisit maintenant, pour chaque ancre, l'occurrence de **même mesure** qui
+> minimise l'écart entre l'écart audio et l'écart de notation (durée médiane
+> locale), par DP bornée (+4 mesures, pénalité de déviation, ordre strict).
+> Résultat Mr. Moustache : M.1-M.3 à 0,72-0,74 mesure/s sur **toutes** les
+> occurrences (avant : 0,36 pour la première M.2).
+>
+> **Limite connue** : les passes **audio-only** entre deux ancres GPIF
+> espacées (ex. Four Horsemen M.23 occ#2, ≈ 1:14) restent étirées : le plan
+> ne peut pas inventer les mesures intermédiaires que la notation ne joue
+> pas. Piste : remplir l'écart entre ancres avec l'ordre des mesures du
+> groupe de reprise, borné par l'écart audio. À traiter séparément, avec le
+> même audit `perd` comme garde-fou.
 
 ---
 

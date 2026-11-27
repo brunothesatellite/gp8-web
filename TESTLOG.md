@@ -446,6 +446,8 @@ n'atteignait pas son optimum en **une** passe (2 clés GPIF non couvertes sur M.
 
 **Note d'analyse (26/11/2026)** : **avant P0**, `gotoBar(26)` (M.27) écrivait le tick **partition** `99 840` dans `api.tickPosition`, qui attend un tick **performance** : le lecteur allait à **35,96 s / M.12** au lieu de **77,99 s / M.27**. Sur AC/DC, le même bug envoyait M.27 à **53,44 s** au lieu de **142,49 s**. **Corrigé en P0** (`perfStartOfBar` + `isSeek`) ; vérifié par `tools/browser/p0-check.js`. Voir `ANALYSE-AUDIO-SYNC-2026-11-26.md` §3.2 et §7.
 
+**Note de correctif (27/11/2026) — première itération de M.1-M.3** : la 1ʳᵉ passe de M.2/M.3 jouait à **1 394 tk/s** (0,36 mesure/s) contre **2 789 tk/s** (0,73) pour les suivantes. Cause : les ancres GPIF sont espacées (M.2.0 à 5,80 s, M.2.1 à 11,32 s) et le LCS, qui ne regarde que l'indice de mesure, appariait la 2ᵉ ancre à la **2ᵉ** passe de notation alors que l'audio contient **deux paires** (4 mesures) dans l'intervalle. Le pré-cuit étirait donc la 1ʳᵉ paire sur 4 mesures. L'appariement est maintenant **affiné par programmation dynamique temporelle** (`refinePairs`) : toutes les occurrences de M.2/M.3 mesurent **2 777-2 829 tk/s** (0,72-0,74 mesure/s), soit la même durée. La M.1 (même phénomène) est corrigée aussi.
+
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
 **Verdict morceau** : ☐ ✅ ☐ 🟡 ☐ ❌ ☐ ? — **Anomalie(s)** n° ____________

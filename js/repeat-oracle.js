@@ -136,6 +136,96 @@
     return pairs;
   }
 
+  /* Affinage temporel des appariements LCS. Le LCS ne connaît que l'indice de
+     mesure : quand les ancres GPIF sont espacées, il peut apparier une ancre à
+     une occurrence trop tôt, et le pré-cuit étire cette passe sur plusieurs
+     mesures. On choisit, pour chaque ancre appariée, l'occurrence de notation
+     de MÊME mesure qui minimise l'écart entre l'écart audio et l'écart de
+     notation (durée médiane locale d'une mesure). Programmation dynamique
+     bornée : +4 mesures au plus, pénalité de déviation, ordre strict. */
+  function refinePairs(G, P, pairs) {
+    const K = pairs.length;
+    if (K < 2) return pairs;
+
+    const ratioAt = (k) => {
+      if (k < 0 || k + 1 >= K) return null;
+      const bars = pairs[k + 1][1] - pairs[k][1];
+      const dA = G[pairs[k + 1][0]].ms - G[pairs[k][0]].ms;
+      return (bars > 0 && dA > 0) ? dA / bars : null;
+    };
+    const median = (a) => {
+      if (!a.length) return null;
+      const s = a.slice().sort((x, y) => x - y);
+      return s[Math.floor(s.length / 2)];
+    };
+    const globalB = median(pairs.map((_, k) => ratioAt(k)).filter(v => v !== null));
+    if (!isFinite(globalB) || globalB <= 0) return pairs;
+
+    const MAX_AHEAD = 4;
+    const CAND = pairs.map(([g, lcP], k) => {
+      const list = [lcP];
+      for (let p = lcP + 1; p < P.length && p <= lcP + MAX_AHEAD; p++) {
+        if (P[p].bar === G[g].bar) list.push(p);
+      }
+      /* La première ancre reste sur son appariement LCS : elle sert d'ancrage
+         au début de la séquence. */
+      return k === 0 ? [lcP] : list;
+    });
+
+    const localB = (k) => {
+      const rs = [];
+      for (let j = Math.max(0, k - 3); j <= Math.min(K - 2, k + 3); j++) {
+        const v = ratioAt(j);
+        if (v !== null) rs.push(v);
+      }
+      return median(rs) || globalB;
+    };
+
+    const back = [];
+    let prevP = CAND[0].slice();
+    let prevCost = CAND[0].map(() => 0);
+    back.push(CAND[0].map(() => -1));
+
+    for (let k = 1; k < K; k++) {
+      const B = localB(k - 1);
+      const costs = [], backs = [];
+      for (const p of CAND[k]) {
+        let best = Infinity, bestPrev = -1;
+        for (let pi = 0; pi < prevP.length; pi++) {
+          const pp = prevP[pi];
+          if (p <= pp) continue;
+          const dA = G[pairs[k][0]].ms - G[pairs[k - 1][0]].ms;
+          if (!(dA > 0)) continue;
+          const expected = Math.min(8, dA / (B > 0 ? B : globalB));
+          const bars = p - pp;
+          const err = (bars - expected) * (bars - expected);
+          const dev = 0.5 * Math.abs(p - pairs[k][1]);
+          const c = prevCost[pi] + err + dev;
+          if (c < best) { best = c; bestPrev = pi; }
+        }
+        costs.push(best);
+        backs.push(bestPrev);
+      }
+      if (costs.every(c => !isFinite(c))) return pairs; // pas de suite valide
+      back.push(backs);
+      prevP = CAND[k].slice();
+      prevCost = costs;
+    }
+
+    let bi = 0;
+    for (let i = 1; i < prevCost.length; i++) if (prevCost[i] < prevCost[bi]) bi = i;
+    if (!isFinite(prevCost[bi])) return pairs;
+    const chosen = new Array(K);
+    chosen[K - 1] = CAND[K - 1][bi];
+    let ci = bi;
+    for (let k = K - 1; k > 0; k--) {
+      ci = back[k][ci];
+      if (ci < 0) return pairs;
+      chosen[k - 1] = CAND[k - 1][ci];
+    }
+    return pairs.map(([g], k) => [g, chosen[k]]);
+  }
+
   /* Construit le plan : toutes les passes GPIF dans l'ordre audio, plus TOUTES
      les passes de notation dans l'ordre du contrôleur. Une passe de notation
      n'est jamais supprimée sous prétexte que sa mesure a déjà un point GPIF :
@@ -148,7 +238,7 @@
     const P = captureNotation(score);
     if (!P.length) return null;
 
-    const pairs = lcsPairs(G, P);
+    const pairs = refinePairs(G, P, lcsPairs(G, P));
     const matchP = new Map(pairs.map(([g, p]) => [g, p]));
     const plan = [];
     let pPtr = 0;
