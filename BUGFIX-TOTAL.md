@@ -458,6 +458,9 @@ Google **Pixel 7a** (viewport CSS 412 × 915 portrait / 915 × 412 paysage) — 
 
 ### 5.5 Options / dette restante
 
+- **Points tempo à analyser** : voir **`RESTE-A-ANALYSER.md`** (Four Horsemen
+  M.23-29 aux 2ᵉ/3ᵉ passages ; Mr. Moustache M.10, M.29, M.42). Mesures
+  consignées, non corrigées.
 - patch **amont alphaTab** (renvois après DalSegno, volta multi-fins) : optionnel ;
 - `deploy/gp8-web2/` (ignoré par git) contient encore un `mix-sync.js` **antérieur
   à P2** — artefact d'une construction antérieure, à supprimer manuellement si inutile.
@@ -557,19 +560,22 @@ Aucun bug **CRITICAL / MAJOR / MINOR** ouvert.
 | `tempo-prebake-spike` | pré-cuisson livrée : fidélité par segment | < 0,5 % |
 | `mix-sync-harness` | **contrôleur réel** : `tempoWrites`, dérive | 0 / ≤ 11 ms |
 | `duration-check` | anacrouse ↔ portée audio GPIF, fin ≤ MP3 | ≤ 0,04 % |
-| `sync-coherence` | **audit P0/P1** : clés GPIF, axe pré-cuit, sauts, outres, ticks partition↔performance | `--strict` : 0 clé / 0 axe / 0 tail |
+| `sync-coherence` | **audit P0/P1** : clés GPIF, couverture de notation (LCS), axe pré-cuit, sauts, outres, ticks partition↔performance | `--strict` : 0 clé / 0 notation perdue / 0 axe / 0 tail |
+| `tempo-repeat-check` | **P1.4** : mesures répétées à durée égale (Mr. Moustache M.1-M.3) | écart ≤ 20 % |
+| `tempo-outliers` | **diagnostic** : occurrences d'une même mesure à durée anormale (à trier : bug de plan ou tempo réel) | — |
 | `browser/p0-check` | **P0 navigateur** : seek M.27 et boucle M.12-13 en ticks performance | 0 échec |
 | `browser/p1-check` | **P1 navigateur** : plan GPIF + seeks tardifs AC/DC / Moustache / Renaud | 0 échec |
 | `browser/p2-check` | **P2 navigateur** : AudioBufferSource, dérive, 0 rate/seek, vitesse | 0 échec |
 
 ```bash
-node tools/test-all.js                  # les 9 harnais (~75 s) → RESULTAT : OK
+node tools/test-all.js                  # les 10 harnais (~75 s) → RESULTAT : OK
+node tools/tempo-outliers.js            # diagnostic des durées de mesures répétées
 gen-samples.bat                         # régénère samples/list.json
 powershell -File deploy/_build.ps1      # reconstruit deploy/gp8-web/
 
 cd tools/browser && npm i               # playwright-core (devDependency LOCALE, isolée)
 npm test                                # 3 exemples (~2 min)
-npm run test:all                        # les 16 exemples (~10 min)
+npm run test:all                        # les 17 exemples (~10 min)
 node run.js --headed --verbose          # navigateur visible, journal complet
 ```
 

@@ -608,11 +608,12 @@ façon de garantir 0 saut pour les arrangements divergents.
 > occurrences (avant : 0,36 pour la première M.2).
 >
 > **Limite connue** : les passes **audio-only** entre deux ancres GPIF
-> espacées (ex. Four Horsemen M.23 occ#2, ≈ 1:14) restent étirées : le plan
-> ne peut pas inventer les mesures intermédiaires que la notation ne joue
-> pas. Piste : remplir l'écart entre ancres avec l'ordre des mesures du
-> groupe de reprise, borné par l'écart audio. À traiter séparément, avec le
-> même audit `perd` comme garde-fou.
+> espacées (ex. Four Horsemen M.23-M.29 aux passages ≈ 1:14 et ≈ 5:14) restent
+> étirées : le plan ne peut pas inventer les mesures intermédiaires que la
+> notation ne joue pas. Piste : remplir l'écart entre ancres avec l'ordre des
+> mesures du groupe de reprise, borné par l'écart audio. Les points restants
+> (Four Horsemen, Mr. Moustache M.10/M.29/M.42) sont consignés dans
+> **`RESTE-A-ANALYSER.md`**, avec les durées et les timestamps.
 
 ---
 
