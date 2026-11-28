@@ -1,6 +1,6 @@
 # GP8-Web — Audio & synchro : bilan, impasses, plan, reste à faire
 
-> **Document unique** (dernière mise à jour : 2026-11-27).
+> **Document unique** (dernière mise à jour : 2026-11-28).
 > Il **remplace et fusionne** : `BUG.md`, `BUGMP3.md`, `BUGRENVOI.md`,
 > `BUGLATEST.md`, `RESPONSIVE.md`, `TESTSAMPLES.md`, `promp.md`, `TODO.md`
 > — tous supprimés le 2026-10-16 ; leur détail intégral reste dans l'historique
@@ -83,12 +83,24 @@
 > pré-cuite ; `installCursorRepeatFix()` force la remise en place du curseur
 > quand un même `Beat` change d'occurrence. Nouveau test navigateur
 > **P3 `p3-check`** : échoue sur l'ancien code (curseur rel=0,80 au lieu de
-> 0,33 au 2ᵉ passage), passe après ; il couvre désormais les **23 occurrences**
-> de M.2 et est intégré à `npm test` / `npm run test:all`. Nouveau contrôle
-> **P1.5 `tempo-strict-check`** : 53 exceptions figées dans
-> `tools/tempo-exceptions.json`, échec si une nouvelle mesure devient anormale.
+> 0,33 au 2ᵉ passage), passe après ; il couvre désormais **toutes les
+> occurrences** de M.2 et est intégré à `npm test` / `npm run test:all`.
+> Nouveau contrôle **P1.5 `tempo-strict-check`** : 53 exceptions figées dans
+> `tools/tempo-exceptions.json` (v1.3.2) ; la v1.4.0 les remplace par un
+> **budget global**, sans liste par morceau.
 > Cache-busting `?v=1.3.2` sur CSS/JS. Tests : **11/11 Node**,
 > **P0/P1/P2/P3**, **18/18 navigateur**.
+>
+> **Traversée générique v1.4.0 (2026-11-28).** `RepeatOracle` ne se contente
+> plus du LCS : un parcours structurel (reprises, fins alternatives, D.C./D.S.,
+> Coda/Fine) produit la séquence de notation avec les occurrences réelles. Si
+> toutes les clés GPIF sont couvertes, le plan **EST** ce parcours (aucune ancre
+> réécrite, aucune mesure étirée) ; sinon le LCS reste le filet de sécurité.
+> Mony Mony : **168 mesures jouées**, **70/70 ancres**, **0 durée anormale**
+> (contre 14 mesures / 31 occurrences), curseur **36/36** occurrences. Audit
+> global des durées anormales : **53/87 → 28/37**. `tempo-exceptions.json`
+> supprimé au profit d'un budget global. Cache-busting `?v=1.4.0`.
+> Tests : **11/11 Node**, **18/18 navigateur**, **P3 36/36**.
 
 Projet : lecteur Guitar Pro **GP8-Web** — alphaTab 1.8.4 vendorisé + piste MP3
 embarquée dans le `.gp`/`.gpx`, avec synchronisation MIDI ↔ MP3.
@@ -581,7 +593,7 @@ Aucun bug **CRITICAL / MAJOR / MINOR** ouvert.
 | `duration-check` | anacrouse ↔ portée audio GPIF, fin ≤ MP3 | ≤ 0,04 % |
 | `sync-coherence` | **audit P0/P1** : clés GPIF, couverture de notation (LCS), axe pré-cuit, sauts, outres, ticks partition↔performance | `--strict` : 0 clé / 0 notation perdue / 0 axe / 0 tail |
 | `tempo-repeat-check` | **P1.4** : mesures répétées à durée égale (Mr. Moustache M.1-M.3) | écart ≤ 20 % |
-| `tempo-strict-check` | **P1.5** : aucune nouvelle durée anormale hors `tempo-exceptions.json` | 0 nouvelle |
+| `tempo-strict-check` | **P1.5** : budget global de durées anormales (sans liste par morceau) | 35 mesures / 50 occurrences · 12 / 16 par fichier |
 | `tempo-outliers` | **diagnostic** : occurrences d'une même mesure à durée anormale (à trier : bug de plan ou tempo réel) | — |
 | `browser/p0-check` | **P0 navigateur** : seek M.27 et boucle M.12-13 en ticks performance | 0 échec |
 | `browser/p1-check` | **P1 navigateur** : plan GPIF + seeks tardifs AC/DC / Moustache / Renaud | 0 échec |

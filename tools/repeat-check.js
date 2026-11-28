@@ -14,7 +14,9 @@
         plan GPIF en silence) ;
      B. le plan GPIF couvre TOUTES les clés (clés manquantes = 0) ;
      C. `raise` ne modifie pas le déroulé (le plan est la seule source) ;
-     D. `raise` est idempotent (un second appel ne lève rien).
+     D. `raise` est idempotent (un second appel ne lève rien) ;
+     E. en mode exact (`walk`), le plan EST le parcours : aucune passe
+        ajoutée, aucune passe de notation perdue.
 
    Usage :  node tools/repeat-check.js     (17 échantillons)
    Sortie : 0 = conforme, 1 = anomalie (testable en CI).
@@ -87,7 +89,16 @@ for (const f of files) {
 
     const n = RO.raise(score, MFG, null);
     const a = RO.metrics(score, MFG);
+    const report = RO.lastReport();
     apres += a.nc;
+
+    /* E. mode exact : le plan doit être le parcours, sans passe ajoutée. */
+    if (report && report.mode === 'walk' &&
+        (report.planSteps !== report.notation || report.inserted !== 0)) {
+      console.log('      ✗ plan exact incohérent ' + label + ' : plan=' +
+        report.planSteps + ' notation=' + report.notation + ' inséré=' + report.inserted);
+      bad++;
+    }
 
     if (a.nc !== 0) {
       console.log('      ✗ CLÉS MANQUANTES ' + label + ' : ' + a.nc); bad++;

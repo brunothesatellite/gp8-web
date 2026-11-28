@@ -9,27 +9,22 @@
    et les accélérations/ralentissements.
 
    SOLUTION P1. Pour un score AVEC piste audio embarquée, on ne laisse plus le
-   contrôleur décider seul du déroulé. On construit un PLAN DE LECTURE :
+   contrôleur décider seul du déroulé. Le module construit un PLAN DE LECTURE :
 
-     1. on capture la séquence de notation P (barres réellement jouées par le
-        contrôleur, occurrences comprises) ;
+     1. un parcours structurel générique (reprises, fins alternatives, D.C.,
+        D.S., Coda/Fine) produit la séquence de notation P avec les mêmes
+        numéros d'occurrence que `_playThroughSong` ;
      2. on liste les passes GPIF G, triées par temps audio (chaque passe =
         un couple mesure/occurrence GP avec ses points) ;
-     3. on apparie G et P par LCS sur l'INDICE DE MESURE (les numéros
-        d'occurrence GP ne sont pas une identité fiable) ;
-     4. on produit un plan qui contient TOUTES les passes GPIF dans l'ordre
-        audio, en insérant les mesures de notation sans point GPIF entre les
-        ancres. Chaque passe GPIF est réécrite avec l'occurrence réelle du
-        plan (`syncPointValue.barOccurence`), donc `generateSyncPoints` et la
-        pré-cuisson la voient exactement une fois.
-     5. le MIDI est généré en parcourant ce plan : mêmes callbacks que le
-        générateur alphaTab (`generateMasterBar`, `generateTracks`,
-        `_processBarTime`), donc tempos, changements de signature et points de
-        synchro restent générés par le code vendor.
+     3. si P couvre TOUTES les clés GPIF, le plan EST P : chaque groupe GPIF
+        est rattaché à la passe de même (mesure, occurrence). Aucun LCS, aucune
+        réécriture d'occurrence, donc aucune mesure étirée ;
+     4. sinon (audio avec passes supplémentaires, ou parcours non concluant),
+        on retombe sur l'appariement LCS historique, qui insère les passes
+        GPIF manquantes et conserve toutes les passes de notation.
 
-   Résultat : plus de clé GPIF perdue par un compteur d'occurrence, plus de
-   D.S./volta interprété à l'envers. Les morceaux sans audio gardent le
-   déroulé alphaTab d'origine (wrapper `normalize` + `_playThroughSong`).
+   Résultat : le cas nominal (structure GPIF = structure de partition) est
+   exact ; les cas divergents gardent le comportement de secours.
 
    Le module reste autonome (aucun DOM), exécutable sous Node par les outils.
    ================================================================== */
@@ -96,10 +91,208 @@
     return [...map.values()].sort((a, b) => a.ms - b.ms);
   }
 
-  /* Séquence de notation P, avec la normalisation des fins multiples. On
-     utilise le `_playThroughSong` BRUT (pas notre wrapper) pour éviter toute
-     récursion ; le plan ne dépend pas des repeatCount ensuite. */
-  function captureNotation(score) {
+  /* ============ PARCOURS DE PARTITION GÉNÉRIQUE =========
+     Le contrôleur alphaTab abandonne les reprises internes et les directions
+     après un D.C./D.S. (state 1) et ne distingue pas un « To Coda » destiné à
+     un D.S. ultérieur. Ce parcours reprend les reprises, les fins alternatives
+     et les directions, mais continue le traitement NORMAL des reprises après
+     un saut, et n'arme le Coda/Fine que pour un saut explicitement « al Coda /
+     al Fine ». Aucun nom de fichier ni numéro de mesure n'est codé ici. */
+  const DIR = {
+    TargetFine: 0, TargetSegno: 1, TargetSegnoSegno: 2, TargetCoda: 3, TargetDoubleCoda: 4,
+    JumpDaCapo: 5, JumpDaCapoAlCoda: 6, JumpDaCapoAlDoubleCoda: 7, JumpDaCapoAlFine: 8,
+    JumpDalSegno: 9, JumpDalSegnoAlCoda: 10, JumpDalSegnoAlDoubleCoda: 11, JumpDalSegnoAlFine: 12,
+    JumpDalSegnoSegno: 13, JumpDalSegnoSegnoAlCoda: 14, JumpDalSegnoSegnoAlDoubleCoda: 15,
+    JumpDalSegnoSegnoAlFine: 16, JumpDaCoda: 17, JumpDaDoubleCoda: 18
+  };
+
+  class RepeatState {
+    constructor(group, opening) {
+      this.group = group;
+      this.opening = opening;
+      const closings = (group.closings || []).slice().sort((a, b) => a.index - b.index);
+      group.closings = closings;
+      this.iterations = closings.map(() => 0);
+      this.closingIndex = 0;
+    }
+  }
+
+  class ScoreWalk {
+    constructor(score) {
+      this.score = score;
+      this.repeatStack = [];
+      this.groupsOnStack = new Set();
+      this.previousAlternateEndings = 0;
+      this.index = 0;
+      this.currentTick = 0;
+      this.shouldPlay = true;
+      this.afterJump = false;
+      this.codaArmed = false;
+      this.fineArmed = false;
+      this.jumpOrigin = -1;
+    }
+    get finished() { return this.index >= this.score.masterBars.length; }
+    resetRepeats() {
+      this.repeatStack.length = 0;
+      this.groupsOnStack.clear();
+      this.previousAlternateEndings = 0;
+    }
+    processCurrent() {
+      const mb = this.score.masterBars[this.index];
+      let alt = mb.alternateEndings;
+      if (alt === 0) alt = this.previousAlternateEndings;
+      const rg = mb.repeatGroup;
+      if (rg && rg.opening === mb && rg.isClosed) {
+        if (!this.groupsOnStack.has(rg)) {
+          this.repeatStack.push(new RepeatState(rg, mb));
+          this.groupsOnStack.add(rg);
+          this.previousAlternateEndings = 0;
+          alt = mb.alternateEndings;
+        }
+      }
+      if (!this.repeatStack.length || alt === 0) this.shouldPlay = true;
+      else {
+        const rep = this.repeatStack[this.repeatStack.length - 1];
+        const iteration = rep.iterations[rep.closingIndex] || 0;
+        this.previousAlternateEndings = alt;
+        this.shouldPlay = (alt & (1 << iteration)) !== 0;
+      }
+      if (this.shouldPlay) this.currentTick += mb.calculateDuration();
+    }
+    findTarget(toFind, from, backwardsFirst) {
+      const forward = () => {
+        for (let i = from; i < this.score.masterBars.length; i++) {
+          const d = this.score.masterBars[i].directions;
+          if (d && d.has(toFind)) return i;
+        }
+        return -1;
+      };
+      const backward = () => {
+        for (let i = from; i >= 0; i--) {
+          const d = this.score.masterBars[i].directions;
+          if (d && d.has(toFind)) return i;
+        }
+        return -1;
+      };
+      if (backwardsFirst) {
+        const b = backward();
+        return b >= 0 ? b : forward();
+      }
+      const f = forward();
+      return f >= 0 ? f : backward();
+    }
+    handleJump(dirs) {
+      if (this.afterJump && this.jumpOrigin === this.index) return false;
+      const daCapo = dirs.has(DIR.JumpDaCapo) || dirs.has(DIR.JumpDaCapoAlCoda) ||
+        dirs.has(DIR.JumpDaCapoAlDoubleCoda) || dirs.has(DIR.JumpDaCapoAlFine);
+      const dalSegno = dirs.has(DIR.JumpDalSegno) || dirs.has(DIR.JumpDalSegnoAlCoda) ||
+        dirs.has(DIR.JumpDalSegnoAlDoubleCoda) || dirs.has(DIR.JumpDalSegnoAlFine);
+      const dalSegnoSegno = dirs.has(DIR.JumpDalSegnoSegno) || dirs.has(DIR.JumpDalSegnoSegnoAlCoda) ||
+        dirs.has(DIR.JumpDalSegnoSegnoAlDoubleCoda) || dirs.has(DIR.JumpDalSegnoSegnoAlFine);
+      if (!daCapo && !dalSegno && !dalSegnoSegno) return false;
+      let target = 0;
+      if (!daCapo) {
+        const segno = dalSegnoSegno ? DIR.TargetSegnoSegno : DIR.TargetSegno;
+        target = this.findTarget(segno, this.index, true);
+        if (target < 0) return false;
+      }
+      const origin = this.index;
+      this.codaArmed = dirs.has(DIR.JumpDaCapoAlCoda) || dirs.has(DIR.JumpDaCapoAlDoubleCoda) ||
+        dirs.has(DIR.JumpDalSegnoAlCoda) || dirs.has(DIR.JumpDalSegnoAlDoubleCoda) ||
+        dirs.has(DIR.JumpDalSegnoSegnoAlCoda) || dirs.has(DIR.JumpDalSegnoSegnoAlDoubleCoda);
+      this.fineArmed = dirs.has(DIR.JumpDaCapoAlFine) || dirs.has(DIR.JumpDalSegnoAlFine) ||
+        dirs.has(DIR.JumpDalSegnoSegnoAlFine);
+      this.jumpOrigin = origin;
+      this.afterJump = true;
+      this.index = target;
+      this.resetRepeats();
+      return true;
+    }
+    moveNext() {
+      const mb = this.score.masterBars[this.index];
+      const dirs = mb.directions;
+      if (dirs && dirs.size) {
+        if (this.afterJump) {
+          if (this.codaArmed && (dirs.has(DIR.JumpDaCoda) || dirs.has(DIR.JumpDaDoubleCoda))) {
+            const target = this.findTarget(dirs.has(DIR.JumpDaDoubleCoda) ? DIR.TargetDoubleCoda : DIR.TargetCoda,
+              this.index, false);
+            if (target >= 0) {
+              this.index = target;
+              this.afterJump = false;
+              this.codaArmed = false;
+              this.fineArmed = false;
+              this.jumpOrigin = -1;
+              this.resetRepeats();
+              return;
+            }
+          }
+          if (this.fineArmed && dirs.has(DIR.TargetFine)) {
+            this.index = this.score.masterBars.length;
+            return;
+          }
+          /* Un nouveau saut reste possible après un D.C. (ex. D.S. al Coda
+             plus loin) ; le saut qui nous a amenés ici n'est pas rejoué. */
+          if (this.handleJump(dirs)) return;
+        } else if (this.handleJump(dirs)) return;
+      }
+      this.moveNormal();
+    }
+    moveNormal() {
+      const mb = this.score.masterBars[this.index];
+      const count = (mb.repeatCount || 0) - 1;
+      if (this.repeatStack.length && count > 0) {
+        const rep = this.repeatStack[this.repeatStack.length - 1];
+        const iter = rep.iterations[rep.closingIndex] || 0;
+        if (iter < count) {
+          this.index = rep.opening.index;
+          rep.iterations[rep.closingIndex] = iter + 1;
+          for (let i = 0; i < rep.closingIndex; i++) rep.iterations[i] = 0;
+          rep.closingIndex = 0;
+          this.previousAlternateEndings = 0;
+        } else if (rep.closingIndex < rep.group.closings.length - 1) {
+          rep.closingIndex++;
+          this.index++;
+        } else {
+          this.repeatStack.pop();
+          this.groupsOnStack.delete(rep.group);
+          this.index++;
+        }
+      } else this.index++;
+    }
+  }
+
+  /* Parcours générique, borné pour éviter une boucle de directions.
+     L'occurrence est globale par mesure, exactement comme le compteur
+     `barOccurence` de `_playThroughSong` et comme les clés GPIF. */
+  function captureWalk(score) {
+    const restore = typeof _normalize === 'function' ? _normalize(score) : null;
+    try {
+      const walk = new ScoreWalk(score);
+      const out = [];
+      const occ = new Map();
+      const max = score.masterBars.length * 16 + 128;
+      while (!walk.finished && out.length <= max) {
+        const bar = score.masterBars[walk.index];
+        walk.processCurrent();
+        if (walk.shouldPlay) {
+          const o = (occ.has(bar.index) ? occ.get(bar.index) : -1) + 1;
+          occ.set(bar.index, o);
+          out.push({ bar: bar.index, occ: o });
+        }
+        walk.moveNext();
+      }
+      if (out.length && out.length <= max) return out;
+      if (_trace) _trace('oracle', 'parcours générique hors borne (' + out.length + ')');
+    } catch (e) {
+      if (_trace) _trace('oracle', 'parcours générique impossible : ' + e.message);
+    } finally {
+      if (restore) restore();
+    }
+    return null;
+  }
+
+  /* Séquence historique alphaTab (référence de secours). */
+  function captureAlpha(score) {
     const out = [];
     const restore = typeof _normalize === 'function' ? _normalize(score) : null;
     try {
@@ -111,6 +304,25 @@
       if (restore) restore();
     }
     return out;
+  }
+
+  /* Choisit, pour le fichier courant, la séquence qui couvre le mieux les
+     ancres GPIF. Le parcours générique est retenu s'il est sain et s'il
+     apparie plus d'ancres que la séquence alphaTab ; sinon on garde alphaTab.
+     Aucun nom de fichier ni numéro de mesure n'intervient. */
+  function notationFor(score, G) {
+    const max = score.masterBars.length * 16 + 128;
+    const evaluate = (P) => {
+      if (!P || !P.length || P.length > max) return null;
+      const pairs = lcsPairs(G, P);
+      const planLen = G.length + P.length - pairs.length;
+      if (planLen > max) return null;
+      return { P, lcs: pairs.length, planLen };
+    };
+    const alpha = evaluate(captureAlpha(score));
+    const walk = evaluate(captureWalk(score));
+    if (walk && (!alpha || walk.lcs > alpha.lcs)) return walk.P;
+    return alpha ? alpha.P : (walk ? walk.P : captureAlpha(score));
   }
 
   /* LCS sur l'INDICE DE MESURE. On ignore volontairement les numéros
@@ -226,16 +438,71 @@
     return pairs.map(([g], k) => [g, chosen[k]]);
   }
 
-  /* Construit le plan : toutes les passes GPIF dans l'ordre audio, plus TOUTES
-     les passes de notation dans l'ordre du contrôleur. Une passe de notation
-     n'est jamais supprimée sous prétexte que sa mesure a déjà un point GPIF :
-     l'appariement LCS peut avoir consommé ce point pour une autre passe, et
-     la passe restante serait alors fusionnée avec la suivante. C'est ce
+  /* Plan exact : le parcours structurel couvre toutes les ancres GPIF avec
+     les bons numéros d'occurrence. Aucune heuristique d'appariement : le plan
+     garde toutes les passes du parcours et rattache chaque groupe GPIF à la
+     passe de même (mesure, occurrence). Renvoie null si une ancre manque,
+     pour laisser la voie historique (LCS) décider. */
+  function exactWalkPlan(score, G, P) {
+    if (!P || !P.length) return null;
+    const byKey = new Map();
+    for (let i = 0; i < P.length; i++) {
+      const k = P[i].bar + '.' + P[i].occ;
+      if (!byKey.has(k)) byKey.set(k, i);
+    }
+    if (byKey.size < G.length) return null;
+    const gpAt = new Map();
+    for (const g of G) {
+      const i = byKey.get(g.bar + '.' + g.occ);
+      if (i === undefined) return null;
+      gpAt.set(i, g);
+    }
+
+    const plan = P.map((p, i) => ({
+      bar: score.masterBars[p.bar],
+      gp: gpAt.get(i) || null,
+      occ: p.occ
+    }));
+
+    /* Les points GPIF sont déjà numérotés avec l'occurrence du parcours ;
+       on réécrit quand même pour que la pré-cuisson et le direct voient la
+       même valeur, comme dans la voie historique. */
+    for (const [i, g] of gpAt) {
+      for (const sp of g.points) {
+        if (sp.syncPointValue) sp.syncPointValue.barOccurence = P[i].occ;
+      }
+    }
+
+    return {
+      plan, G, P, pairs: [],
+      inserted: 0,
+      matched: gpAt.size,
+      notation: P.length,
+      notationKept: P.length,
+      notationDropped: 0,
+      mode: 'walk'
+    };
+  }
+
+  /* Voie de secours : toutes les passes GPIF dans l'ordre audio, plus TOUTES
+     les passes de notation dans l'ordre du contrôleur. Utilisée seulement quand
+     le parcours structurel ne couvre pas exactement les ancres. Une passe de
+     notation n'est jamais supprimée sous prétexte que sa mesure a déjà un point
+     GPIF : l'appariement LCS peut avoir consommé ce point pour une autre passe,
+     et la passe restante serait alors fusionnée avec la suivante. C'est ce
      fusionnement qui faisait étirer une mesure sur deux (tempo ÷ 2). */
   function buildPlan(score) {
     const G = gpGroupsOf(score);
     if (!G.length) return null;
-    const P = captureNotation(score);
+
+    /* Voie générique exacte : le parcours structurel produit déjà les mêmes
+       couples (mesure, occurrence) que les ancres GPIF. Dans ce cas le plan
+       EST le parcours, sans LCS ni réécriture d'occurrence : chaque ancre
+       tombe sur la passe qu'elle désigne réellement. */
+    const exact = exactWalkPlan(score, G, captureWalk(score));
+    if (exact) return exact;
+
+    const P = notationFor(score, G);
     if (!P.length) return null;
 
     const pairs = refinePairs(G, P, lcsPairs(G, P));
@@ -298,7 +565,8 @@
       matched: plan.length - plainCount,
       notation: P.length,
       notationKept,
-      notationDropped
+      notationDropped,
+      mode: 'lcs'
     };
   }
 
@@ -491,7 +759,7 @@
       const plan = ensurePlan(score);
       if (!plan) return 0;
       report = {
-        mode: 'plan',
+        mode: plan.mode || 'plan',
         gpGroups: plan.G.length,
         planSteps: plan.plan.length,
         inserted: plan.inserted,
@@ -520,8 +788,25 @@
 
   function lastReport() { return report; }
 
+  /* Vrai si le parcours structurel couvre exactement toutes les ancres. */
+  function walkCoversAll(G, P) {
+    if (!P || !P.length) return false;
+    const keys = new Set();
+    for (const p of P) keys.add(p.bar + '.' + p.occ);
+    for (const g of G) if (!keys.has(g.bar + '.' + g.occ)) return false;
+    return true;
+  }
+
+  function notationOf(score) {
+    const G = gpGroupsOf(score);
+    if (!G.length) return captureAlpha(score);
+    const walk = captureWalk(score);
+    if (walkCoversAll(G, walk)) return walk;
+    return notationFor(score, G);
+  }
+
   global.RepeatOracle = {
-    install, raise, metrics, walkMaxOcc, h1ShiftsOf, lastReport,
+    install, raise, metrics, walkMaxOcc, h1ShiftsOf, lastReport, notationOf,
     get walkSeq() { return walkSeq; }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

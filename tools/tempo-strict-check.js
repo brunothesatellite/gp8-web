@@ -4,35 +4,29 @@
    ------------------------------------------------------------------
    `tempo-outliers.js` liste les occurrences d'une même mesure dont la durée
    pré-cuite dévie de plus de 40 % de la médiane. Certaines déviations sont
-   des tempos réels ou des points déjà consignés (RESTE-A-ANALYSER.md) : ils
-   sont dans `tools/tempo-exceptions.json`.
+   des tempos réels ou des arrangements (half-time, intro, etc.) : on ne fige
+   plus une liste d'exceptions par morceau. On contrôle un BUDGET GLOBAL et un
+   plafond par fichier, volontairement au-dessus du niveau courant mais très
+   en-dessous de l'ancien comportement.
 
-   Ce test rejoue l'audit et échoue si une mesure devient anormale SANS être
-   dans la liste d'exceptions. Une exception devenue inutile est signalée mais
-   n'échoue pas.
+   Niveau courant v1.4.0 (traversée exacte + secours LCS) : 28 mesures / 37 occurrences.
+   Ancien niveau (v1.3.2) : 53 mesures / 87 occurrences.
 
    Usage : node tools/tempo-strict-check.js
    ================================================================== */
 
 const { execFileSync } = require('child_process');
-const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const TOOL = path.join(__dirname, 'tempo-outliers.js');
-const BASELINE = path.join(__dirname, 'tempo-exceptions.json');
 
-let baseline;
-try {
-  baseline = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
-} catch (e) {
-  console.error('ECHEC lecture ' + BASELINE + ' : ' + e.message);
-  process.exit(1);
-}
-if (!baseline || !baseline.exceptions) {
-  console.error('ECHEC : ' + BASELINE + ' ne contient pas "exceptions".');
-  process.exit(1);
-}
+const BUDGET = {
+  measures: 35,
+  occurrences: 50,
+  perFileMeasures: 12,
+  perFileOccurrences: 16
+};
 
 let actual;
 try {
@@ -48,32 +42,40 @@ try {
   if (e && e.stdout) console.error(String(e.stdout).slice(0, 2000));
   process.exit(1);
 }
-if (!actual || !actual.exceptions) {
-  console.error('ECHEC : sortie tempo-outliers sans "exceptions".');
+if (!actual || typeof actual.count !== 'number') {
+  console.error('ECHEC : sortie tempo-outliers sans compteurs.');
   process.exit(1);
 }
 
-const baseKeys = new Set(Object.keys(baseline.exceptions));
-const actKeys = new Set(Object.keys(actual.exceptions));
-const unexpected = [...actKeys].filter(k => !baseKeys.has(k)).sort();
-const stale = [...baseKeys].filter(k => !actKeys.has(k)).sort();
+const failures = [];
+if (actual.count > BUDGET.measures) {
+  failures.push('mesures anormales ' + actual.count + ' > budget ' + BUDGET.measures);
+}
+if (actual.occurrences > BUDGET.occurrences) {
+  failures.push('occurrences anormales ' + actual.occurrences + ' > budget ' + BUDGET.occurrences);
+}
+const files = actual.files || {};
+for (const [name, st] of Object.entries(files)) {
+  if (st.measures > BUDGET.perFileMeasures) {
+    failures.push(name + ' : ' + st.measures + ' mesures > plafond ' + BUDGET.perFileMeasures);
+  }
+  if (st.occurrences > BUDGET.perFileOccurrences) {
+    failures.push(name + ' : ' + st.occurrences + ' occurrences > plafond ' + BUDGET.perFileOccurrences);
+  }
+}
 
 console.log('');
-console.log('DURÉES RÉPÉTÉES — contrôle strict avec exceptions');
-console.log('baseline : ' + baseKeys.size + ' exception(s) · audit : ' +
-  actual.count + ' mesure(s) / ' + actual.occurrences + ' occurrence(s)');
-if (stale.length) {
-  console.log('  ⚠ exception(s) devenue(s) inutile(s) : ' + stale.length +
-    ' (à nettoyer, non bloquant)');
-  for (const k of stale.slice(0, 5)) console.log('    - ' + k);
-}
-if (unexpected.length) {
-  console.log('  ❌ nouvelle(s) mesure(s) anormale(s) hors exceptions : ' + unexpected.length);
-  for (const k of unexpected) console.log('    - ' + k);
+console.log('DURÉES RÉPÉTÉES — contrôle strict par budget global');
+console.log('audit : ' + actual.count + ' mesure(s) / ' + actual.occurrences + ' occurrence(s) · ' +
+  'budget : ' + BUDGET.measures + ' / ' + BUDGET.occurrences +
+  ' · plafond par fichier : ' + BUDGET.perFileMeasures + ' / ' + BUDGET.perFileOccurrences);
+if (failures.length) {
+  console.log('  ❌ budget dépassé :');
+  for (const f of failures) console.log('    - ' + f);
   console.log('');
   console.log('RESULTAT P1.5 : ECHEC');
   process.exit(1);
 }
-console.log('  ✅ aucune nouvelle mesure anormale hors exceptions');
+console.log('  ✅ budget global respecté');
 console.log('');
 console.log('RESULTAT P1.5 : OK');

@@ -29,8 +29,8 @@
 | plan GPIF : **0 clé manquante** sur les 18 | `tools/sync-coherence.js --strict` (exit 0) |
 | P2 : audio dans l'AudioContext du synthé | `browser/p2-check` — 0 rate/seek, dérive 2-8 ms |
 | P2b : vitesses ×0,5/×1,5 sans transposition | `browser/p2-check` — `preservesPitch`, dérive < 25 ms |
-| P3 : curseur des mesures vides répétées | `browser/p3-check` — 23 occurrences de M.2, retour au début à chaque passage |
-| P1.5 : durées répétées hors exceptions | `tools/tempo-strict-check.js` — 53 exceptions figées, 0 nouvelle |
+| P3 : curseur des mesures vides répétées | `browser/p3-check` - toutes les occurrences de M.2, retour au début à chaque passage |
+| P1.5 : durées répétées | `tools/tempo-strict-check.js` - budget global (28 mesures / 37 occurrences, plafond par fichier) |
 | `node tools/test-all.js` | **11/11**, exit 0 (dont `sync-coherence --strict`). |
 | audit de cohérence `tools/sync-coherence.js` | **18 fichiers : 0 clé manquante, 0 axe, 0 pente hors plage, 0 tail ; `--strict` passe (P1)** |
 
@@ -471,6 +471,8 @@ n'atteignait pas son optimum en **une** passe (2 clés GPIF non couvertes sur M.
 | 4 | continu | tout | MIDI + MP3 ensemble, 0 erreur console | | |
 
 **Note de correctif (28/11/2026)** : `js/player.js` aligne désormais les `tempoChanges` du `tickLookup` sur la carte **pré-cuite** (`syncTickLookupTempo`) et force `placeBeatCursor` quand un même `Beat` change d'occurrence (`installCursorRepeatFix`). Test navigateur **`p3-check`** : échoue sur l'ancien code (curseur rel=0,80 au 2ᵉ passage au lieu de 0,33), passe après. Depuis la v1.3.2, `p3-check` vérifie les **23 occurrences** de M.2 et est intégré à `npm test` / `npm run test:all`. **Fin de morceau** : la webapp s'arrête à **288,1 s** (dernier GPIF) alors que le MP3 fait **302,7 s** ; **14,6 s** ne sont pas jouées. **Tempo** : 13 mesures / 32 occurrences restent hors tolérance (M.5, M.6, M.7, M.9, M.10, M.12, M.18…), consignées dans `RESTE-A-ANALYSER.md` §3.
+
+**Note v1.4.0 (28/11/2026)** : la traversée structurelle générique rejoue les **3 passes** ; le plan Mony passe à **168 mesures**, **70/70 ancres**, **0 durée anormale** (contre 13 mesures / 32 occurrences en v1.3.2), et `p3-check` couvre désormais **36 occurrences** de M.2. Le tail MP3 de **14,6 s** reste non joué (point distinct).
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________

@@ -73,7 +73,7 @@ const normalizeMultiClosingRepeats = new Function(extractFn(playerSrc, 'normaliz
    référence à couvrir. On garde la méthode d'origine pour ne pas dépendre
    des métriques internes de l'oracle. */
 const RAW_PLAY = MFG._playThroughSong;
-function notationOf(score) {
+function notationRaw(score) {
   const out = [];
   const restore = normalizeMultiClosingRepeats(score);
   try {
@@ -106,6 +106,12 @@ const RO = globalThis.RepeatOracle;
 if (!RO) throw new Error('RepeatOracle absent');
 if (RO.install(MFG, normalizeMultiClosingRepeats, null) === 'failed') {
   throw new Error('RepeatOracle.install a échoué');
+}
+
+/* P doit être la même séquence que celle utilisée par le plan (parcours
+   générique ou alphaTab, selon le choix interne de RepeatOracle). */
+function notationOf(score) {
+  return typeof RO.notationOf === 'function' ? RO.notationOf(score) : notationRaw(score);
 }
 
 /* js/mix-sync.js exécuté tel quel (table + pré-cuisson livrées) */
@@ -173,7 +179,7 @@ function loadScore(file) {
 function analyze(file) {
   const score = loadScore(file);
   fixEmptyAnacrusis(score);
-  const notation = notationOf(score);
+  const notation = notationOf(score).map(p => (typeof p === 'number' ? p : p.bar));
   const raised = RO.raise(score, MFG, null);
   const report = RO.lastReport();
   const rawPts = MFG.generateSyncPoints(score) || [];

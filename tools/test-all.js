@@ -34,7 +34,7 @@ const SUITE = [
   ['duration-check',      "P4 : anacrouse ↔ portée audio GPIF, fin de webapp ≤ MP3"],
   ['sync-coherence',      "P1 : 0 clé GPIF, 0 notation perdue, 0 axe pré-cuit, 0 tail", ['--strict']],
   ['tempo-repeat-check',  "P1.4 : mesures répétées à durée égale (Mr. Moustache M.1-M.3)"],
-  ['tempo-strict-check',  "P1.5 : aucune nouvelle durée anormale hors exceptions"]
+  ['tempo-strict-check',  "P1.5 : budget global de durées anormales"]
 ];
 
 if (!fs.existsSync(path.join(__dirname, 'vendor', 'alphaTab.js'))) {

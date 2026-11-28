@@ -1,25 +1,32 @@
 # Reste à analyser — points tempo consignés le 2026-11-28
 
+> **Mise à jour 2026-11-28 (v1.4.0)** : la **traversée générique exacte**
+> (reprises, fins alternatives, D.C./D.S./Coda) remplace l'heuristique
+> d'appariement quand elle couvre toutes les ancres GPIF. Résultat : Mony Mony
+> passe de 14 mesures / 31 occurrences anormales à **0**, et l'audit global de
+> 53 / 87 à **28 mesures / 37 occurrences**. Les chiffres Mony du corps
+> ci-dessous sont donc **historiques**.
+>
 > **Statut** : ces points sont **consignés pour analyse ultérieure**, pas corrigés.
 > Ils ne sont pas des régressions de la v1.3.2 : ils étaient déjà présents, ou
 > relèvent d'un désaccord structurel entre la notation et l'audio embarqué.
 >
-> **Version** : v1.3.2 — correctifs « passes de notation perdues », « affinage
-> temporel des ancres GPIF », sample Mony Mony, curseur des reprises et
-> cache-busting.
+> **Version** : v1.4.0 — traversée structurelle générique, plan GPIF exact,
+> budget global des durées anormales.
 >
 > **Outils** :
 > - `node tools/tempo-outliers.js` : liste les occurrences d'une même mesure
 >   dont la durée pré-cuite dévie de plus de 40 % de la médiane
->   (**53 mesures / 87 occurrences / 18 fichiers** au 2026-11-28).
-> - `node tools/tempo-strict-check.js` : test P1.5 ; échoue si une mesure
->   devient anormale hors de `tools/tempo-exceptions.json`.
+>   (**28 mesures / 37 occurrences / 18 fichiers** avec la traversée exacte).
+> - `node tools/tempo-strict-check.js` : test P1.5 ; budget global
+>   (35 mesures / 50 occurrences, plafond 12 / 16 par fichier), sans liste
+>   d'exceptions par morceau.
 > - `node tools/tempo-repeat-check.js` : test P1.4 (mesures répétées à durée
 >   égale, Mr. Moustache M.1-M.3).
 > - `node tools/sync-coherence.js --strict` : invariants globaux (0 clé,
 >   0 notation perdue, 0 axe, 0 tail).
-> - `cd tools/browser && npm run test:p3` : curseur des 23 occurrences de M.2
->   de Mony Mony (intégré à `npm test` depuis la v1.3.2).
+> - `cd tools/browser && npm run test:p3` : curseur de **toutes** les
+>   occurrences de M.2 de Mony Mony (intégré à `npm test`).
 >
 > Les durées ci-dessous sont les durées **pré-cuites** (celles que joue le
 > synthé), mesurées après `RepeatOracle.raise` + `MixSync.prebake`, et les
@@ -184,12 +191,13 @@ audio. À valider avec `tempo-outliers`, `tempo-strict-check` et P3.
 
 ## 4. Autres mesures signalées par l'outil
 
-`node tools/tempo-outliers.js` liste **53 mesures / 87 occurrences** sur 18
-fichiers. Toutes ne sont pas des bugs : certaines sont des changements de tempo
-réels. Les cas ci-dessus sont ceux demandés ; le reste peut être trié plus tard
-avec le même outil, en commençant par les ratios ≈ 2,00 ou ≈ 0,50 qui suivent
-souvent un cluster d'ancres espacées. Les exceptions actuelles sont figées dans
-`tools/tempo-exceptions.json` et contrôlées par `tempo-strict-check`.
+`node tools/tempo-outliers.js` liste **28 mesures / 37 occurrences** sur 18
+fichiers avec la traversée exacte (53 / 87 avec l'ancienne heuristique). Toutes
+ne sont pas des bugs : certaines sont des changements de tempo réels. Les cas
+ci-dessus sont ceux demandés ; le reste peut être trié plus tard avec le même
+outil, en commençant par les ratios ≈ 2,00 ou ≈ 0,50 qui suivent souvent un
+cluster d'ancres espacées. Le contrôle `tempo-strict-check` applique désormais
+un **budget global**, sans liste d'exceptions par morceau.
 
 ---
 
@@ -218,7 +226,6 @@ sonde temporaire utilisée le 28/11/2026 est dans
 - Affinage temporel des ancres : commit `4da6cef`.
 - Sample Mony Mony + curseur : commit `3d4baec`.
 - Audit : `tools/sync-coherence.js`, `tools/tempo-repeat-check.js`,
-  `tools/tempo-strict-check.js`, `tools/tempo-outliers.js`,
-  `tools/tempo-exceptions.json`.
+  `tools/tempo-strict-check.js`, `tools/tempo-outliers.js`.
 - Journal d'écoute : `TESTLOG.md` §5.10 (Four Horsemen), §5.17 (Mr. Moustache),
   §5.18 (Mony Mony).

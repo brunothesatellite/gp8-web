@@ -122,6 +122,7 @@ if (!JSON_OUT) {
 
 let totalBars = 0, totalOut = 0;
 const exceptions = {};
+const fileStats = {};
 for (const file of files) {
   let score;
   try { score = loadScore(file); } catch (e) { console.log('ECHEC ' + path.basename(file) + ' : ' + e.message); continue; }
@@ -148,6 +149,7 @@ for (const file of files) {
     byBar.get(b).push({ i, pre, dur, audio: MixSync.audioMsFor(pre) });
   });
 
+  let fileBars = 0, fileOut = 0;
   const lines = [];
   for (const [b, entries] of [...byBar.entries()].sort((x, y) => x[0] - y[0])) {
     if (entries.length < 2) continue;
@@ -158,12 +160,12 @@ for (const file of files) {
       .map(e => ({ ...e, ratio: e.dur / med }))
       .filter(e => e.ratio > 1.4 || e.ratio < 0.7);
     if (!out.length) continue;
+    fileBars++;
+    fileOut += out.length;
     totalBars++;
     totalOut += out.length;
     const base = path.basename(file).replace(/\.gp$/, '');
-    const reason = /Mony Mony|Four Horsemen|Mr\. Moustache/.test(base)
-      ? 'point consigné dans RESTE-A-ANALYSER.md'
-      : 'tempo réel / arrangement à confirmer';
+    const reason = 'tempo réel, saut structurel ou point à confirmer';
     exceptions[base + '|M.' + (b + 1)] = reason;
     const shown = SHOW_ALL ? out : out.slice(0, 5);
     lines.push('  M.' + (b + 1) + ' (' + entries.length + ' occ., médiane ' + Math.round(med) + ' ms) : ' +
@@ -171,6 +173,7 @@ for (const file of files) {
         Math.round(e.dur) + 'ms ×' + e.ratio.toFixed(2)).join(' · ') +
       (out.length > shown.length ? ' · +' + (out.length - shown.length) : ''));
   }
+  fileStats[path.basename(file).replace(/\.gp$/, '')] = { measures: fileBars, occurrences: fileOut };
   if (!JSON_OUT && lines.length) {
     console.log(path.basename(file).replace(/\.gp$/, ''));
     console.log(lines.join('\n'));
@@ -181,9 +184,10 @@ if (JSON_OUT) {
   console.log(JSON.stringify({
     generated: new Date().toISOString(),
     threshold: 'ratio > 1.4 ou < 0.7',
-    note: 'Exceptions de référence : tempo réel, saut structurel ou point consigné dans RESTE-A-ANALYSER.md. Une nouvelle mesure anormale doit être analysée, pas ajoutée automatiquement.',
+    note: 'Anomalies de durée détectées : tempo réel, saut structurel ou point à confirmer. Le contrôle strict applique un budget global, sans liste par morceau.',
     count: totalBars,
     occurrences: totalOut,
+    files: fileStats,
     exceptions
   }, null, 2));
 } else {
