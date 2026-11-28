@@ -21,16 +21,17 @@
 
 | Invariant | Preuve |
 |---|---|
-| `playbackSpeed` **jamais écrit en lecture** (⇒ 0 coupure de synthé) | banc `mix-sync-harness` **17/17** (`tempoWrites = 0`) + navigateur réel |
+| `playbackSpeed` **jamais écrit en lecture** (⇒ 0 coupure de synthé) | banc `mix-sync-harness` **18/18** (`tempoWrites = 0`) + navigateur réel |
 | 0 erreur console | navigateur réel, chaque morceau |
 | dérive de croisière bornée par la zone morte | **0-11 ms** (banc), **10-79 ms** (navigateur) |
 | anacrouses alignées sur l'audio | **7/7 ≤ 0,04 %** |
-| fin de webapp **jamais** au-delà du MP3 | **17/17** |
-| plan GPIF : **0 clé manquante** sur les 17 | `tools/sync-coherence.js --strict` (exit 0) |
+| fin de webapp **jamais** au-delà du MP3 | **18/18** |
+| plan GPIF : **0 clé manquante** sur les 18 | `tools/sync-coherence.js --strict` (exit 0) |
 | P2 : audio dans l'AudioContext du synthé | `browser/p2-check` — 0 rate/seek, dérive 2-8 ms |
 | P2b : vitesses ×0,5/×1,5 sans transposition | `browser/p2-check` — `preservesPitch`, dérive < 25 ms |
-| `node tools/test-all.js` | **9/9**, exit 0 (dont `sync-coherence --strict`). |
-| audit de cohérence `tools/sync-coherence.js` | **17 fichiers : 0 clé manquante, 0 axe, 0 pente hors plage, 0 tail ; `--strict` passe (P1)** |
+| P3 : curseur des mesures vides répétées | `browser/p3-check` — retour au début à chaque passage |
+| `node tools/test-all.js` | **10/10**, exit 0 (dont `sync-coherence --strict`). |
+| audit de cohérence `tools/sync-coherence.js` | **18 fichiers : 0 clé manquante, 0 axe, 0 pente hors plage, 0 tail ; `--strict` passe (P1)** |
 
 **Question posée à l'oreille** : le **ressenti** (timbre, « colle » MIDI↔MP3,
 nature des sauts, transitions de tempo). Les chiffres disent *« pas de
@@ -448,6 +449,27 @@ n'atteignait pas son optimum en **une** passe (2 clés GPIF non couvertes sur M.
 **Note d'analyse (26/11/2026)** : **avant P0**, `gotoBar(26)` (M.27) écrivait le tick **partition** `99 840` dans `api.tickPosition`, qui attend un tick **performance** : le lecteur allait à **35,96 s / M.12** au lieu de **77,99 s / M.27**. Sur AC/DC, le même bug envoyait M.27 à **53,44 s** au lieu de **142,49 s**. **Corrigé en P0** (`perfStartOfBar` + `isSeek`) ; vérifié par `tools/browser/p0-check.js`. Voir `ANALYSE-AUDIO-SYNC-2026-11-26.md` §3.2 et §7.
 
 **Note de correctif (27/11/2026) — première itération de M.1-M.3** : la 1ʳᵉ passe de M.2/M.3 jouait à **1 394 tk/s** (0,36 mesure/s) contre **2 789 tk/s** (0,73) pour les suivantes. Cause : les ancres GPIF sont espacées (M.2.0 à 5,80 s, M.2.1 à 11,32 s) et le LCS, qui ne regarde que l'indice de mesure, appariait la 2ᵉ ancre à la **2ᵉ** passe de notation alors que l'audio contient **deux paires** (4 mesures) dans l'intervalle. Le pré-cuit étirait donc la 1ʳᵉ paire sur 4 mesures. L'appariement est maintenant **affiné par programmation dynamique temporelle** (`refinePairs`) : toutes les occurrences de M.2/M.3 mesurent **2 777-2 829 tk/s** (0,72-0,74 mesure/s), soit la même durée. La M.1 (même phénomène) est corrigée aussi. Les mesures **M.10, M.29, M.42** restent à analyser (durées d'occurrences anormales) : détail, mesures et pistes dans **`RESTE-A-ANALYSER.md`** §2.
+
+**Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
+**Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________
+**Verdict morceau** : ☐ ✅ ☐ 🟡 ☐ ❌ ☐ ? — **Anomalie(s)** n° ____________
+**Notes** : ________________________________________________________________
+
+---
+
+### 5.18 · Billy Idol — Mony Mony  *(ajouté le 28/11/2026)*
+`Billy Idol (1981 - Don't Stop) - Mony Mony.gp`
+**Angle** : **mesures vides répétées** (M.2 ×12) + curseur ; a révélé que le tickLookup gardait le tempo noté au lieu du tempo pré-cuit et que le curseur ne revenait pas au début d'une reprise de beat identique.
+**Machine** : 39 mesures · 1 piste · 70 points GPIF · plan 105 · notation 74 · **0 clé manquante** · 4 sauts structurels · 0 axe · 0 tail · pré-cuit 276,9 s · audio 288,1 s.
+
+| # | Repère | Où (mesure) | Attendu | Relevé | Verdict |
+|---|---|---|---|---|---|
+| 1 | ≈ 00:09 | **M.2 ×12** (mesure vide) | le curseur traverse la mesure à chaque passage et **revient au début** au passage suivant ; pas d'attente à la fin | | |
+| 2 | ≈ 00:11 | **M.2 2ᵉ passage** (étiré ×2 par le pré-cuit) | le curseur avance au tempo réellement joué (≈ 3,55 s), pas au tempo noté (≈ 1,78 s) | | |
+| 3 | ≈ 00:30 | **M.3** (notes tenues) | curseur et audio collés, aucun saut | | |
+| 4 | continu | tout | MIDI + MP3 ensemble, 0 erreur console | | |
+
+**Note de correctif (28/11/2026)** : `js/player.js` aligne désormais les `tempoChanges` du `tickLookup` sur la carte **pré-cuite** (`syncTickLookupTempo`) et force `placeBeatCursor` quand un même `Beat` change d'occurrence (`installCursorRepeatFix`). Test navigateur **`p3-check`** : échoue sur l'ancien code (curseur rel=0,80 au 2ᵉ passage au lieu de 0,33), passe après.
 
 **Grille commune** : T1 ☐ · T2 ☐ · T3 ☐ · T4 ☐ · T5 ☐ · T6 ☐ · T7 ☐
 **Console** : `[mix]` ____________ · dérive max `[mix-stats]` ______ ms · `[oracle]` ____________

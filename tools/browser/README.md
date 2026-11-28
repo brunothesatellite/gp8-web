@@ -22,10 +22,11 @@ Ce test est la seule exception, et elle est confinée :
 cd tools/browser
 npm i          # installe playwright-core (léger : pas de Chromium embarqué)
 npm test       # 3 exemples représentatifs (Sepultura, Dr. Stein, Renaud) ~2 min
-npm run test:all          # les 17 exemples du manifeste ~10 min
+npm run test:all          # les 18 exemples du manifeste ~10 min
 npm run test:p0           # P0 : seek M.27 + boucle M.12-13 en ticks performance
 npm run test:p1           # P1 : plan GPIF + seeks tardifs (AC/DC, Moustache, Renaud)
 npm run test:p2           # P2 : AudioBufferSourceNode, dérive, vitesse
+npm run test:p3           # P3 : curseur des mesures vides répétées (Mony Mony M.2 ×12)
 node run.js --headed      # navigateur visible (débogage, audio réel)
 node run.js --sample Renaud --seconds 15 --verbose
 ```
@@ -78,12 +79,12 @@ navigateur est **bornée par la zone morte du contrôleur (~100 ms)**, pas par l
 
 ## Résultat de référence (`npm run test:all`)
 
-**17/17** exemples verts : **0** écriture de `playbackSpeed` en lecture, 0 erreur
+**18/18** exemples verts : **0** écriture de `playbackSpeed` en lecture, 0 erreur
 console, dérive de croisière **2-8 ms** (cible stricte) depuis P2. Détail complet
 en `BUGFIX-TOTAL.md` §2.5.
 
-> Le manifeste est **complet** depuis P6 : `samples/list.json` a **17** entrées,
-> une par `.gp` de `samples/` (`The Four Horsemen` et `Mr. Moustache` inclus). Si un `.gp` est
+> Le manifeste est **complet** depuis P6 : `samples/list.json` a **18** entrées,
+> une par `.gp` de `samples/` (`Mony Mony`, `The Four Horsemen` et `Mr. Moustache` inclus). Si un `.gp` est
 > ajouté, relancer `gen-samples.bat` — le harnais **signale** en tête de sortie
 > tout fichier présent sur disque mais absent du manifeste.
 >

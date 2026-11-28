@@ -122,6 +122,7 @@
       installRepeatNormalization();  // AVANT toute génération MIDI/synchro
       installTempoPrebake();         // tempo de l'enregistrement écrit dans le MIDI
       S.api = new alphaTab.AlphaTabApi(container, CFG.alphatab);
+      installCursorRepeatFix(S.api); // reprises d'une mesure vide : le curseur revient au début
       /* `api.player` renvoie NULL tant que `_player.instance` n'est pas prêt
          (l.46264) : on cible l'objet interne `api._player`, le
          `AlphaSynthWrapper` qui porte réellement `_instance`. */
@@ -730,6 +731,51 @@
       }
     }
 
+    /* ============ CURSEUR : TEMPO PRÉ-CUIT DANS LE TICK LOOKUP =========
+       `MixSync.prebake()` réécrit les `TempoChangeEvent` du MidiFile, mais le
+       `tickLookup` d'alphaTab garde les tempos NOTÉS. Or `findBeat()` calcule
+       la durée d'animation du curseur avec ces tempos : sur une mesure étirée
+       par le pré-cuit (ex. M.2 de Mony Mony, 1 778 → 3 546 ms), le curseur
+       atteint la fin de la mesure au bout de 1 778 ms puis attend. On aligne
+       donc les `tempoChanges` du tickLookup sur la carte pré-cuite réelle. */
+    function syncTickLookupTempo(tickLookup, midiFile, tickShift) {
+      try {
+        if (!tickLookup || !tickLookup.masterBars || !tickLookup.masterBars.length) return 0;
+        const midi = alphaTab.midi || {};
+        const TT = (midi.MidiEventType || {}).TempoChange;
+        const TCL = midi.MasterBarTickLookupTempoChange;
+        if (!TT || typeof TCL !== 'function') return 0;
+        const shift = isFinite(tickShift) ? tickShift : 0;
+        const evs = [];
+        for (const tr of midiFile.tracks) for (const e of tr.events) {
+          if (e.type === TT && e.beatsPerMinute > 0) {
+            evs.push({ tick: e.tick - shift, bpm: e.beatsPerMinute });
+          }
+        }
+        if (!evs.length) return 0;
+        evs.sort((a, b) => a.tick - b.tick);
+        let ei = 0, current = evs[0].bpm, n = 0;
+        for (const mb of tickLookup.masterBars) {
+          while (ei < evs.length && evs[ei].tick <= mb.start) {
+            current = evs[ei].bpm;
+            ei++;
+          }
+          const changes = [new TCL(mb.start, current)];
+          let j = ei;
+          while (j < evs.length && evs[j].tick < mb.end) {
+            changes.push(new TCL(evs[j].tick, evs[j].bpm));
+            j++;
+          }
+          mb.tempoChanges = changes;
+          n++;
+        }
+        return n;
+      } catch (e) {
+        console.warn('[tempo] mise à jour du tickLookup impossible', e);
+        return 0;
+      }
+    }
+
     /* ============ TEMPO PRÉ-CUIT (stratégie C, BUGFIX-TOTAL P2) =========
        `loadMidiForScore()` génère le MidiFile du score puis le passe au
        lecteur : `MidiFileGenerator.generate()` → `player.loadMidiFile(midi)`.
@@ -759,7 +805,9 @@
               const n = MixSync.prebake(midiFile,
                 sp.map(p => ({ tick: p.synthTick, t: p.synthTime, a: p.syncTime })),
                 h.tickShift);
-              trace('tempo', n + ' tempo(s) pré-cuit(s)');
+              const nc = syncTickLookupTempo(this.tickLookup, midiFile, h.tickShift);
+              trace('tempo', n + ' tempo(s) pré-cuit(s)' +
+                (nc ? ' · curseur recalé sur ' + nc + ' mesure(s)' : ''));
               /* CURSEUR ANIMÉ. alphaTab ancre le curseur sur
                  `modifiedTempo / originalTempo` (`syncBpm × playbackSpeed` sur
                  le tempo courant du MIDI). Avant P2, `originalTempo` était le
@@ -788,6 +836,33 @@
       } catch (e) {
         console.warn('[tempo] installation de la pré-cuisson impossible', e);
       }
+    }
+
+    /* ============ CURSEUR : REPRISES D'UN MÊME BEAT =========
+       Une mesure vide (ou un beat unique) répétée réutilise le MÊME objet
+       `Beat` et les MÊMES bounds graphiques. Au début de la reprise,
+       `startBeatX` égale `previousBeatBounds.onNotesX` : le renderer saute
+       `placeBeatCursor`, et la transition part de la fin du passage précédent.
+       Le curseur reste collé à la fin. On force la remise en place quand le
+       résultat change d'occurrence (`start` différent) pour le même beat. */
+    function installCursorRepeatFix(api) {
+      if (!api || api.__gp8CursorRepeatFix) return;
+      const orig = api._cursorUpdateBeat;
+      if (typeof orig !== 'function') {
+        trace('curseur', 'correctif reprises indisponible (_cursorUpdateBeat absent)');
+        return;
+      }
+      api._cursorUpdateBeat = function (lookupResult, stop, shouldScroll, cursorSpeed, forceUpdate) {
+        let force = forceUpdate;
+        const prev = this._currentBeat;
+        if (!force && prev && lookupResult && lookupResult.beat === prev.beat &&
+            lookupResult.start !== prev.start) {
+          force = true;
+        }
+        return orig.call(this, lookupResult, stop, shouldScroll, cursorSpeed, force);
+      };
+      api.__gp8CursorRepeatFix = true;
+      trace('curseur', 'correctif reprises de mesures identiques installé');
     }
 
     /* Remplit le modèle avec les niveaux d'origine SANS toucher aux canaux

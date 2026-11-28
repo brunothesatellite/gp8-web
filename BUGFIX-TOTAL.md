@@ -70,6 +70,21 @@
 > M.2 occ#0 **1 394 → 2 787 tk/s**, M.3 occ#0 **2 237 → 2 784 tk/s**, toutes
 > les occurrences à **0,72-0,74 mesure/s** ; M.1 corrigée aussi. Audit :
 > **0 notation perdue, 0 axe, 0 tail**, tests **9/9 + P0/P1/P2 + 17/17**.
+>
+> **Sample Mony Mony + curseur (2026-11-28).** Ajout de
+> `Billy Idol (1981 - Don't Stop) - Mony Mony.gp` (18ᵉ exemple, manifeste à
+> jour). Correctif du curseur sur les **mesures vides répétées** : alphaTab
+> réutilise le même `Beat` et les mêmes bounds, donc au début d'une reprise
+> `placeBeatCursor` était sauté et le curseur restait collé à la fin ; de plus
+> le `tickLookup` gardait le tempo **noté** au lieu du tempo **pré-cuit**, donc
+> le curseur atteignait la fin trop tôt sur les mesures étirées (M.2 de Mony
+> Mony : 1 778 → 3 546 ms). Deux correctifs dans `js/player.js` :
+> `syncTickLookupTempo()` aligne les `tempoChanges` du tickLookup sur la carte
+> pré-cuite ; `installCursorRepeatFix()` force la remise en place du curseur
+> quand un même `Beat` change d'occurrence. Nouveau test navigateur
+> **P3 `p3-check`** : échoue sur l'ancien code (curseur rel=0,80 au lieu de
+> 0,33 au 2ᵉ passage), passe après. Tests : **10/10 Node**, **P0/P1/P2/P3**,
+> **18/18 navigateur**.
 
 Projet : lecteur Guitar Pro **GP8-Web** — alphaTab 1.8.4 vendorisé + piste MP3
 embarquée dans le `.gp`/`.gpx`, avec synchronisation MIDI ↔ MP3.
@@ -566,6 +581,7 @@ Aucun bug **CRITICAL / MAJOR / MINOR** ouvert.
 | `browser/p0-check` | **P0 navigateur** : seek M.27 et boucle M.12-13 en ticks performance | 0 échec |
 | `browser/p1-check` | **P1 navigateur** : plan GPIF + seeks tardifs AC/DC / Moustache / Renaud | 0 échec |
 | `browser/p2-check` | **P2 navigateur** : AudioBufferSource, dérive, 0 rate/seek, vitesse | 0 échec |
+| `browser/p3-check` | **P3 navigateur** : curseur des mesures vides répétées (Mony Mony M.2 ×12) | retour au début à chaque passage |
 
 ```bash
 node tools/test-all.js                  # les 10 harnais (~75 s) → RESULTAT : OK
@@ -575,7 +591,7 @@ powershell -File deploy/_build.ps1      # reconstruit deploy/gp8-web/
 
 cd tools/browser && npm i               # playwright-core (devDependency LOCALE, isolée)
 npm test                                # 3 exemples (~2 min)
-npm run test:all                        # les 17 exemples (~10 min)
+npm run test:all                        # les 18 exemples (~10 min)
 node run.js --headed --verbose          # navigateur visible, journal complet
 ```
 
