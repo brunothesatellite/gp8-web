@@ -7,7 +7,7 @@
 #   excludeFiles -> *.md (BUGFIX-TOTAL.md, TESTLOG.md), TESTLOG.html
 #                   (outils de travail locaux), .gitignore,
 #                   gen-samples.bat (outil local), ordures Windows
-# Reste : index.html, css/, js/, samples/ (15 .gp + list.json), favicon*.
+# Reste : index.html, css/, js/, samples/ (18 .gp + list.json), favicon*.
 
 $deployDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $src = Split-Path -Parent $deployDir

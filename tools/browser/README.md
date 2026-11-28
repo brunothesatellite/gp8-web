@@ -21,12 +21,12 @@ Ce test est la seule exception, et elle est confinée :
 ```bash
 cd tools/browser
 npm i          # installe playwright-core (léger : pas de Chromium embarqué)
-npm test       # 3 exemples représentatifs (Sepultura, Dr. Stein, Renaud) ~2 min
-npm run test:all          # les 18 exemples du manifeste ~10 min
+npm test       # 3 exemples représentatifs + P3 (~3 min)
+npm run test:all          # les 18 exemples du manifeste + P3 (~12 min)
 npm run test:p0           # P0 : seek M.27 + boucle M.12-13 en ticks performance
 npm run test:p1           # P1 : plan GPIF + seeks tardifs (AC/DC, Moustache, Renaud)
 npm run test:p2           # P2 : AudioBufferSourceNode, dérive, vitesse
-npm run test:p3           # P3 : curseur des mesures vides répétées (Mony Mony M.2 ×12)
+npm run test:p3           # P3 : curseur des 23 occurrences de M.2 (Mony Mony)
 node run.js --headed      # navigateur visible (débogage, audio réel)
 node run.js --sample Renaud --seconds 15 --verbose
 ```
@@ -80,8 +80,9 @@ navigateur est **bornée par la zone morte du contrôleur (~100 ms)**, pas par l
 ## Résultat de référence (`npm run test:all`)
 
 **18/18** exemples verts : **0** écriture de `playbackSpeed` en lecture, 0 erreur
-console, dérive de croisière **2-8 ms** (cible stricte) depuis P2. Détail complet
-en `BUGFIX-TOTAL.md` §2.5.
+console, dérive de croisière **2-8 ms** (cible stricte) depuis P2. **P3** couvre
+les **23 occurrences** de M.2 de Mony Mony et est intégré à `npm test` /
+`npm run test:all`. Détail complet en `BUGFIX-TOTAL.md` §2.5.
 
 > Le manifeste est **complet** depuis P6 : `samples/list.json` a **18** entrées,
 > une par `.gp` de `samples/` (`Mony Mony`, `The Four Horsemen` et `Mr. Moustache` inclus). Si un `.gp` est

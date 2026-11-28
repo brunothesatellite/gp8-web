@@ -167,6 +167,38 @@ const T2 = 23040;                 // 3e occurrence
         '3e passage : retour au début', 'rel=' + thirdStart.toFixed(2) + ' (début=' + startRel.toFixed(2) + ')');
     }
 
+    /* Toutes les occurrences de M.2 (23 dans le plan), y compris les
+       sections lointaines après les sauts. À 350 ms, le curseur doit avoir
+       repris au début et progressé, jamais rester collé à la fin. */
+    const starts = await page.evaluate(() =>
+      Player.S.api.tickCache.masterBars.filter(e => e.masterBar.index === 1).map(e => e.start));
+    check(starts.length === 23, '23 occurrences de M.2 dans le plan', starts.length + ' occurrence(s)');
+    const badAll = [];
+    for (let i = 0; i < starts.length; i++) {
+      await page.evaluate(t => { Player.stop(); Player.S.api.tickPosition = t; }, starts[i]);
+      await page.waitForTimeout(200);
+      await page.evaluate(() => Player.play());
+      await page.waitForTimeout(350);
+      const s = await page.evaluate(() => {
+        const beat = document.querySelector('.at-cursor-beat');
+        const bar = document.querySelector('.at-cursor-bar');
+        const br = beat ? beat.getBoundingClientRect() : null;
+        const ar = bar ? bar.getBoundingClientRect() : null;
+        return {
+          tick: Player.S.api.tickPosition,
+          rel: (br && ar && ar.width > 1) ? (br.left - ar.left) / ar.width : null,
+          state: Player.S.api.playerState
+        };
+      });
+      if (s.rel == null || s.rel >= 0.75 || s.state !== 1) {
+        badAll.push('#' + i + ' tick=' + Math.round(s.tick) + ' rel=' +
+          (s.rel == null ? '?' : s.rel.toFixed(2)) + ' state=' + s.state);
+      }
+    }
+    check(badAll.length === 0, 'toutes les occurrences M.2 repartent du début',
+      badAll.length ? badAll.slice(0, 3).join(' | ') : starts.length + '/' + starts.length);
+    await page.evaluate(() => Player.stop());
+
     check(errors.length === 0, 'aucune erreur console', errors.slice(0, 3).join(' | '));
   } catch (e) {
     failed++;

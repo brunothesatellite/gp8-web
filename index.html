@@ -37,7 +37,7 @@
 <!-- JSZip : bonus d'analyse du conteneur .gp (zip) -->
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 
-<link rel="stylesheet" href="css/styles.css">
+<link rel="stylesheet" href="css/styles.css?v=1.3.2">
 </head>
 
 <body class="h-[100dvh] flex flex-col overflow-hidden bg-slate-950 text-slate-200 antialiased selection:bg-sky-500/30">
@@ -334,13 +334,14 @@
        lexicographiques globaux (CFG, AT, $, safe, Player, Samples, App…).
        Un tag déplacé casse le chargement : `node tools/load-smoke.js`
        vérifie l'ordre déclaré dans index.html ET l'exécution complète. -->
-  <script src="js/core.js"></script>            <!-- config + helpers ($, safe, clamp) -->
-  <script src="js/audio-sync.js"></script>      <!-- <audio> HTML5 caché -->
-  <script src="js/embedded-audio.js"></script>  <!-- JSZip : audio embarqué du .gp -->
-  <script src="js/mix-sync.js"></script>        <!-- synthé alphaTab (maître) + <audio> (esclave) -->
-  <script src="js/repeat-oracle.js"></script>   <!-- traversées = points GPIF (RC-1) -->
-  <script src="js/player.js"></script>          <!-- wrapper alphaTab : mélangeur, boucle, affichage -->
-  <script src="js/samples.js"></script>         <!-- découverte des fichiers d'exemple -->
-  <script src="js/app.js"></script>             <!-- interface, tiroir, raccourcis, boot() -->
+  <!-- Cache-busting : incrémenter ?v=… à chaque release (même version que l'asset). -->
+  <script src="js/core.js?v=1.3.2"></script>            <!-- config + helpers ($, safe, clamp) -->
+  <script src="js/audio-sync.js?v=1.3.2"></script>      <!-- <audio> HTML5 caché -->
+  <script src="js/embedded-audio.js?v=1.3.2"></script>  <!-- JSZip : audio embarqué du .gp -->
+  <script src="js/mix-sync.js?v=1.3.2"></script>        <!-- synthé alphaTab (maître) + <audio> (esclave) -->
+  <script src="js/repeat-oracle.js?v=1.3.2"></script>   <!-- traversées = points GPIF (RC-1) -->
+  <script src="js/player.js?v=1.3.2"></script>          <!-- wrapper alphaTab : mélangeur, boucle, affichage -->
+  <script src="js/samples.js?v=1.3.2"></script>         <!-- découverte des fichiers d'exemple -->
+  <script src="js/app.js?v=1.3.2"></script>             <!-- interface, tiroir, raccourcis, boot() -->
 </body>
 </html>

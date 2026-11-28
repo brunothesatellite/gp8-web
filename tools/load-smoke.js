@@ -202,7 +202,10 @@ function main() {
   /* --- l'ORDRE des <script src="js/..."> de index.html doit être celui
          de ORDER : un tag déplacé casse le partage des bindings globaux. - */
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  const tags = [...html.matchAll(/<script\s+src="(js\/[^"]+)"/g)].map(m => m[1]);
+  /* Cache-busting : les tags peuvent porter ?v=… ; l'ordre se juge sur le
+     chemin sans query. */
+  const tags = [...html.matchAll(/<script\s+src="(js\/[^"]+)"/g)]
+    .map(m => m[1].split('?')[0]);
   const declared = JSON.stringify(tags);
   const wanted   = JSON.stringify(ORDER);
   if (declared !== wanted) {

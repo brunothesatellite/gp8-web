@@ -1,19 +1,25 @@
-# Reste à analyser — points tempo consignés le 2026-11-27
+# Reste à analyser — points tempo consignés le 2026-11-28
 
 > **Statut** : ces points sont **consignés pour analyse ultérieure**, pas corrigés.
-> Ils ne sont pas des régressions de la v1.3.1 : ils étaient déjà présents, ou
+> Ils ne sont pas des régressions de la v1.3.2 : ils étaient déjà présents, ou
 > relèvent d'un désaccord structurel entre la notation et l'audio embarqué.
 >
-> **Version** : v1.3.1 (`4da6cef`) — correctifs « passes de notation perdues »
-> et « affinage temporel des ancres GPIF ».
+> **Version** : v1.3.2 — correctifs « passes de notation perdues », « affinage
+> temporel des ancres GPIF », sample Mony Mony, curseur des reprises et
+> cache-busting.
 >
 > **Outils** :
 > - `node tools/tempo-outliers.js` : liste les occurrences d'une même mesure
->   dont la durée pré-cuite dévie de plus de 40 % de la médiane.
+>   dont la durée pré-cuite dévie de plus de 40 % de la médiane
+>   (**53 mesures / 87 occurrences / 18 fichiers** au 2026-11-28).
+> - `node tools/tempo-strict-check.js` : test P1.5 ; échoue si une mesure
+>   devient anormale hors de `tools/tempo-exceptions.json`.
 > - `node tools/tempo-repeat-check.js` : test P1.4 (mesures répétées à durée
 >   égale, Mr. Moustache M.1-M.3).
 > - `node tools/sync-coherence.js --strict` : invariants globaux (0 clé,
 >   0 notation perdue, 0 axe, 0 tail).
+> - `cd tools/browser && npm run test:p3` : curseur des 23 occurrences de M.2
+>   de Mony Mony (intégré à `npm test` depuis la v1.3.2).
 >
 > Les durées ci-dessous sont les durées **pré-cuites** (celles que joue le
 > synthé), mesurées après `RepeatOracle.raise` + `MixSync.prebake`, et les
@@ -112,37 +118,107 @@ sans preuve.
 
 ---
 
-## 3. Autres mesures signalées par l'outil
+## 3. Billy Idol — Mony Mony
 
-`node tools/tempo-outliers.js` liste **40 mesures / 55 occurrences** sur 17
-fichiers. Toutes ne sont pas des bugs : certaines sont des changements de tempo
-réels. Les cas ci-dessus sont ceux demandés ; le reste peut être trié plus tard
-avec le même outil, en commençant par les ratios ≈ 2,00 ou ≈ 0,50 qui suivent
-souvent un cluster d'ancres espacées.
+Fichier : `samples/Billy Idol (1981 - Don't Stop) - Mony Mony.gp`
+
+### 3.1 Alignement GPIF / notation
+
+| Indicateur | Valeur |
+|---|---:|
+| Mesures du score | 39 |
+| Ancres GPIF (groupes) | **70** |
+| Passes de notation P | **74** |
+| Plan final | **105** |
+| **Appariements LCS réels** | **39 / 70** |
+| Ancres GPIF non appariées | **31** |
+| Passes de notation non ancrées | **35** |
+| `report.matched` affiché | 70 (en réalité `G.length`, pas le LCS) |
+
+**Hypothèse principale** : les reprises **internes** (M.6 ×2, M.9 ×4, M.10 ×3,
+M.12 ×2) sont consommées lors de la **première** traversée de la section
+M.1-M.14. Lors de la deuxième traversée (P[35]…), alphaTab ne les rejoue
+qu'une fois : la séquence P ne contient plus les passes internes, alors que
+l'audio et les ancres GPIF les contiennent encore. Le plan insère les ancres
+GPIF supplémentaires en audio-only, mais pas les mesures intermédiaires entre
+deux ancres espacées ; le pré-cuit étire alors ces mesures.
+
+### 3.2 Occurrences anormales (durées pré-cuites)
+
+| Mesure | plan# | Audio | Durée | Ratio |
+|---|---:|---:|---:|---:|
+| **M.5** | 86 | **229,55 s** | **5 313 ms** | **×2,99** |
+| **M.6** | 45 | **96,39 s** | **3 551 ms** | **×2,00** |
+| **M.7** | 87 | **234,86 s** | **5 313 ms** | **×1,50** |
+| **M.9** | 49 | **107,04 s** | **5 327 ms** | **×1,49** |
+| **M.10** | 50 | **112,37 s** | **3 551 ms** | **×2,00** |
+| **M.10** | 90 | **249,07 s** | **3 544 ms** | **×2,00** |
+| **M.12** | 92 | **254,41 s** | **3 560 ms** | **×1,99** |
+| **M.18** | 64 | **160,32 s** | **1 776 ms** | **×0,50** |
+
+Les mesures **vides** M.1 et M.2 ont aussi des durées variables (M.2 : 1 773 à
+3 546 ms), mais elles sont inaudibles ; le curseur suit désormais le tempo
+pré-cuit réel (P3 vérifie les 23 occurrences de M.2).
+
+### 3.3 Fin de morceau
+
+- Dernier point GPIF / fin de la webapp : **288,138 s**
+- MP3 : **302,736 s**
+- **14,6 s de MP3 ne sont pas jouées** : la webapp s'arrête après M.39, sur le
+  dernier point GPIF, alors que le MP3 continue. La sonde de fin confirme
+  l'arrêt à ≈ 288 s. À vérifier si cette fin est un outro musical ou du silence.
+
+**Renaud (vérifié le 28/11/2026)** : la webapp s'arrête à **≈ 373,3 s**
+(MP3 373,176 s) ; le `preEnd` pré-cuit de **374,193 s** n'est pas joué. Il n'y a
+donc **pas de dépassement audible** ; l'écart `preEnd > MP3` est un tail MIDI
+non joué, pas une coupure. `duration-check` reste valide sur l'axe audio.
+
+### 3.4 Piste de correction
+
+Rejouer les reprises internes à chaque traversée de la section externe
+(réinitialiser les compteurs de reprise imbriqués), ou remplir les écarts entre
+ancres GPIF avec l'ordre des mesures du groupe de reprise, borné par l'écart
+audio. À valider avec `tempo-outliers`, `tempo-strict-check` et P3.
 
 ---
 
-## 4. Commandes de reproduction
+## 4. Autres mesures signalées par l'outil
+
+`node tools/tempo-outliers.js` liste **53 mesures / 87 occurrences** sur 18
+fichiers. Toutes ne sont pas des bugs : certaines sont des changements de tempo
+réels. Les cas ci-dessus sont ceux demandés ; le reste peut être trié plus tard
+avec le même outil, en commençant par les ratios ≈ 2,00 ou ≈ 0,50 qui suivent
+souvent un cluster d'ancres espacées. Les exceptions actuelles sont figées dans
+`tools/tempo-exceptions.json` et contrôlées par `tempo-strict-check`.
+
+---
+
+## 5. Commandes de reproduction
 
 ```bash
 node tools/tempo-outliers.js
+node tools/tempo-strict-check.js
 node tools/tempo-repeat-check.js
 node tools/sync-coherence.js --strict
 node tools/test-all.js
+cd tools/browser && npm run test:p3
 ```
 
 Pour mesurer le tempo réel d'une occurrence dans le navigateur : charger le
 morceau, se positionner sur `tickCache.masterBars[i].start` de l'occurrence,
 lire `Player.S.api.tickPosition` sur ≥ 2 s et diviser par le temps mur. La
-sonde temporaire utilisée le 27/11/2026 est dans
-`%TEMP%\opencode\gp8-analysis\moustache-probe.js` et `occ-probe.js`.
+sonde temporaire utilisée le 28/11/2026 est dans
+`%TEMP%\opencode\gp8-analysis\mony-all-occ.js` et `end-probe.js`.
 
 ---
 
-## 5. Références
+## 6. Références
 
 - Correctif passes de notation : commit `1fff455`.
 - Affinage temporel des ancres : commit `4da6cef`.
+- Sample Mony Mony + curseur : commit `3d4baec`.
 - Audit : `tools/sync-coherence.js`, `tools/tempo-repeat-check.js`,
-  `tools/tempo-outliers.js`.
-- Journal d'écoute : `TESTLOG.md` §5.10 (Four Horsemen), §5.17 (Mr. Moustache).
+  `tools/tempo-strict-check.js`, `tools/tempo-outliers.js`,
+  `tools/tempo-exceptions.json`.
+- Journal d'écoute : `TESTLOG.md` §5.10 (Four Horsemen), §5.17 (Mr. Moustache),
+  §5.18 (Mony Mony).

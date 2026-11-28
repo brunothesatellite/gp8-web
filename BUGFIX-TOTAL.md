@@ -83,8 +83,12 @@
 > pré-cuite ; `installCursorRepeatFix()` force la remise en place du curseur
 > quand un même `Beat` change d'occurrence. Nouveau test navigateur
 > **P3 `p3-check`** : échoue sur l'ancien code (curseur rel=0,80 au lieu de
-> 0,33 au 2ᵉ passage), passe après. Tests : **10/10 Node**, **P0/P1/P2/P3**,
-> **18/18 navigateur**.
+> 0,33 au 2ᵉ passage), passe après ; il couvre désormais les **23 occurrences**
+> de M.2 et est intégré à `npm test` / `npm run test:all`. Nouveau contrôle
+> **P1.5 `tempo-strict-check`** : 53 exceptions figées dans
+> `tools/tempo-exceptions.json`, échec si une nouvelle mesure devient anormale.
+> Cache-busting `?v=1.3.2` sur CSS/JS. Tests : **11/11 Node**,
+> **P0/P1/P2/P3**, **18/18 navigateur**.
 
 Projet : lecteur Guitar Pro **GP8-Web** — alphaTab 1.8.4 vendorisé + piste MP3
 embarquée dans le `.gp`/`.gpx`, avec synchronisation MIDI ↔ MP3.
@@ -577,21 +581,23 @@ Aucun bug **CRITICAL / MAJOR / MINOR** ouvert.
 | `duration-check` | anacrouse ↔ portée audio GPIF, fin ≤ MP3 | ≤ 0,04 % |
 | `sync-coherence` | **audit P0/P1** : clés GPIF, couverture de notation (LCS), axe pré-cuit, sauts, outres, ticks partition↔performance | `--strict` : 0 clé / 0 notation perdue / 0 axe / 0 tail |
 | `tempo-repeat-check` | **P1.4** : mesures répétées à durée égale (Mr. Moustache M.1-M.3) | écart ≤ 20 % |
+| `tempo-strict-check` | **P1.5** : aucune nouvelle durée anormale hors `tempo-exceptions.json` | 0 nouvelle |
 | `tempo-outliers` | **diagnostic** : occurrences d'une même mesure à durée anormale (à trier : bug de plan ou tempo réel) | — |
 | `browser/p0-check` | **P0 navigateur** : seek M.27 et boucle M.12-13 en ticks performance | 0 échec |
 | `browser/p1-check` | **P1 navigateur** : plan GPIF + seeks tardifs AC/DC / Moustache / Renaud | 0 échec |
 | `browser/p2-check` | **P2 navigateur** : AudioBufferSource, dérive, 0 rate/seek, vitesse | 0 échec |
-| `browser/p3-check` | **P3 navigateur** : curseur des mesures vides répétées (Mony Mony M.2 ×12) | retour au début à chaque passage |
+| `browser/p3-check` | **P3 navigateur** : curseur des mesures vides répétées (Mony Mony M.2, **23 occurrences**) | retour au début à chaque passage |
 
 ```bash
-node tools/test-all.js                  # les 10 harnais (~75 s) → RESULTAT : OK
+node tools/test-all.js                  # les 11 harnais (~85 s) → RESULTAT : OK
 node tools/tempo-outliers.js            # diagnostic des durées de mesures répétées
+node tools/tempo-strict-check.js        # non-régression hors exceptions
 gen-samples.bat                         # régénère samples/list.json
 powershell -File deploy/_build.ps1      # reconstruit deploy/gp8-web/
 
 cd tools/browser && npm i               # playwright-core (devDependency LOCALE, isolée)
-npm test                                # 3 exemples (~2 min)
-npm run test:all                        # les 18 exemples (~10 min)
+npm test                                # 3 exemples + P3 (~3 min)
+npm run test:all                        # les 18 exemples + P3 (~12 min)
 node run.js --headed --verbose          # navigateur visible, journal complet
 ```
 

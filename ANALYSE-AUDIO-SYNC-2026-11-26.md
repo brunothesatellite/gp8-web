@@ -612,8 +612,20 @@ façon de garantir 0 saut pour les arrangements divergents.
 > étirées : le plan ne peut pas inventer les mesures intermédiaires que la
 > notation ne joue pas. Piste : remplir l'écart entre ancres avec l'ordre des
 > mesures du groupe de reprise, borné par l'écart audio. Les points restants
-> (Four Horsemen, Mr. Moustache M.10/M.29/M.42) sont consignés dans
+> (Four Horsemen, Mr. Moustache M.10/M.29/M.42, Mony Mony) sont consignés dans
 > **`RESTE-A-ANALYSER.md`**, avec les durées et les timestamps.
+>
+> **Mony Mony (2026-11-28)** : les reprises **internes** (M.6 ×2, M.9 ×4,
+> M.10 ×3, M.12 ×2) semblent consommées lors de la première traversée de
+> M.1-M.14 ; la seconde traversée n'en garde qu'une passe dans P, alors que
+> l'audio/GPIF les rejoue. D'où 39/70 appariements LCS, 31 ancres audio-only,
+> 35 passes de notation non ancrées, 105 pas de plan pour 39 mesures, et des
+> étirements ×2 à ×3 à 96/107/112/229/234/249/254 s. Le pré-cuit reste
+> cohérent avec la carte GPIF (axe 0 ms), mais le tempo musical est faux dans
+> ces sections. Piste : réinitialiser les compteurs de reprise imbriqués à
+> chaque traversée externe, ou remplir les écarts entre ancres. Le contrôle
+> **P1.5 `tempo-strict-check`** fige les 53 exceptions actuelles et échoue si
+> une nouvelle mesure devient anormale.
 
 ---
 

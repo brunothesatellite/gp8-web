@@ -106,18 +106,22 @@ function loadScore(file) {
 
 const argv = process.argv.slice(2);
 const SHOW_ALL = argv.includes('--all');
+const JSON_OUT = argv.includes('--json');
 const gi = argv.indexOf('--gp');
 const files = gi >= 0
   ? [path.resolve(argv[gi + 1])]
   : fs.readdirSync(SAMPLES).filter(f => /\.gp$/i.test(f)).sort().map(f => path.join(SAMPLES, f));
 
-console.log('');
-console.log('DURÉES PRÉ-CUITES ANORMALES — occurrences d\'une même mesure');
-console.log('ratio = durée de l\'occurrence / médiane de la mesure ; |ratio-1| > 0,4');
-console.log('Un ratio anormal peut être un vrai changement de tempo de l\'audio.');
-console.log('');
+if (!JSON_OUT) {
+  console.log('');
+  console.log('DURÉES PRÉ-CUITES ANORMALES — occurrences d\'une même mesure');
+  console.log('ratio = durée de l\'occurrence / médiane de la mesure ; |ratio-1| > 0,4');
+  console.log('Un ratio anormal peut être un vrai changement de tempo de l\'audio.');
+  console.log('');
+}
 
 let totalBars = 0, totalOut = 0;
+const exceptions = {};
 for (const file of files) {
   let score;
   try { score = loadScore(file); } catch (e) { console.log('ECHEC ' + path.basename(file) + ' : ' + e.message); continue; }
@@ -156,17 +160,33 @@ for (const file of files) {
     if (!out.length) continue;
     totalBars++;
     totalOut += out.length;
+    const base = path.basename(file).replace(/\.gp$/, '');
+    const reason = /Mony Mony|Four Horsemen|Mr\. Moustache/.test(base)
+      ? 'point consigné dans RESTE-A-ANALYSER.md'
+      : 'tempo réel / arrangement à confirmer';
+    exceptions[base + '|M.' + (b + 1)] = reason;
     const shown = SHOW_ALL ? out : out.slice(0, 5);
     lines.push('  M.' + (b + 1) + ' (' + entries.length + ' occ., médiane ' + Math.round(med) + ' ms) : ' +
       shown.map(e => 'plan#' + e.i + ' @' + (e.audio / 1000).toFixed(2) + 's ' +
         Math.round(e.dur) + 'ms ×' + e.ratio.toFixed(2)).join(' · ') +
       (out.length > shown.length ? ' · +' + (out.length - shown.length) : ''));
   }
-  if (lines.length) {
+  if (!JSON_OUT && lines.length) {
     console.log(path.basename(file).replace(/\.gp$/, ''));
     console.log(lines.join('\n'));
     console.log('');
   }
 }
-console.log('Total : ' + totalBars + ' mesure(s) avec occurrence anormale, ' + totalOut + ' occurrence(s).');
-console.log('Pour approfondir : vérifier les ancres GPIF autour du timestamp, puis si le tempo audio est réellement différent.');
+if (JSON_OUT) {
+  console.log(JSON.stringify({
+    generated: new Date().toISOString(),
+    threshold: 'ratio > 1.4 ou < 0.7',
+    note: 'Exceptions de référence : tempo réel, saut structurel ou point consigné dans RESTE-A-ANALYSER.md. Une nouvelle mesure anormale doit être analysée, pas ajoutée automatiquement.',
+    count: totalBars,
+    occurrences: totalOut,
+    exceptions
+  }, null, 2));
+} else {
+  console.log('Total : ' + totalBars + ' mesure(s) avec occurrence anormale, ' + totalOut + ' occurrence(s).');
+  console.log('Pour approfondir : vérifier les ancres GPIF autour du timestamp, puis si le tempo audio est réellement différent.');
+}
